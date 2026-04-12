@@ -1,377 +1,52 @@
-Universidade Federal de Goi´as
-Instituto de Inform´atica
-Compiladores e Compiladores 1
-2026-1
-Trabalho 1 - Implementa¸c˜ao Compilador para a Linguagem
-G-V1
-Prof. Thierson Couto Rosa
-1 Objetivo
-Este trabalho tem como objetivo a implementa¸c˜ao de um compilador did´atico para a linguagem G-V1. A linguagem ser´a estendida no trabalho T2, incluindo fu¸c˜oes e o tipo vetor.
-A linguagem G-V1 cont´em apenas um m´odulo principal. E estruturada em blocos. Cada ´
-bloco pode conter uma ou mais declara¸c˜oes de vari´aveis e uma lista de comandos. Um dos
-comandos pode ser outro bloco. Portanto, um mesmo nome de vari´avel pode estar associado
-a vari´aveis de blocos distintos. As vari´aveis da linguagem podem estar associadas a apenas
-dois tipos: car e int.
-2 Gram´atica para a linguagem G-V1
-A seguir, ´e apresentada a gram´atica para a linguagem G-V1. N˜ao ser´a apresentada a
-qu´adrupla completa correspondente `a gram´atica que descreve a linguagem. O conjunto VN
-de s´ımbolos n˜ao-terminais da gram´atica ´e formado pelo conjunto de s´ımbolos nas regras de
-deriva¸c˜ao que iniciam com uma letra mai´uscula e que aparecem do lado esquerdo da seta em
-alguma produ¸c˜ao.
-O conjunto VT de terminais da gram´atica ´e formado por todos os s´ımbolos escritos completamente em letras mai´uscula e por s´ımbolos que aparecem entre ap´ostrofes.
-1
-P rograma → DeclP rograma
-DeclP rograma → PRINCIPAL Bloco
-Bloco → ’{’ListaComando ’}’
-| V arSection ’{’ ListaComando ’}’
-V arSection → ’{’ ListaDeclV ar ’}’
-ListaDeclV ar → IDENTIFICADOR DeclV ar ’:’ T ipo ’;’ ListaDeclV ar
-| IDENTIFICADOR DeclV ar ’:’ T ipo ’;’
-DeclV ar → 
-| ’,’ IDENTIFICADOR DeclV ar
-T ipo → INT
-| CAR
-ListaComando → Comando
-| Comando ListaComando
-Comando → ’;’
-| Expr ’;’
-| LEIA IDENTIFICADOR ’;’
-| ESCREVA Expr ’;’
-| ESCREVA CADEIACARACTERES ’;’
-| NOVALINHA ’;’
-| SE ’(’ Expr ’)’ ENTAO Comando FIMSE
-| SE ’(’ Expr ’)’ ENTAO Comando SENAO Comando FIMSE
-| ENQUANTO’(’ Expr ’)’ Comando
-| Bloco
-Expr → OrExpr
-| IDENTIFICADOR ’=’ Expr
-2
-OrExpr → OrExpr OU AndExpr
-| AndExpr
-AndExpr → AndExpr E EqExpr
-| EqExpr
-EqExpr → EqExpr IGUAL DesigExpr
-| EqExpr DIFERENTE DesigExpr
-| DesigExpr
-DesigExpr → DesigExpr ’<’ AddExpr
-| DesigExpr ’>’ AddExpr
-| DesigExpr MAIORIGUAL AddExpr
-| DesigExpr MENORIGUAL AddExpr
-| AddExpr
-AddExpr → AddExpr ’+’ MulExpr
-| AddExpr ’-’ MulExpr
-| MulExpr
-MulExpr → MulExpr ’*’ UnExpr
-| MulExpr ’/’ UnExpr
-| UnExpr
-UnExpr → ’-’ P rimExpr
-| ’!’ P rimExpr
-| P rimExpr
-P rimExpr → IDENTIFICADOR
-| CARCONST
-| INTCONST
-| ’(’ Expr ’)’
-A seguir s˜ao apresentadas as defini¸c˜oes de tokens que n˜ao correspondem a um ´unico
-caracter. A primeira coluna do tabela 1 corresponde ao token e a segunda coluna corresponde
-`a defini¸c˜ao dos lexemas que podem aparecer no token correspondente `a primeira coluna do
-quadro. Os alunos devem criar express˜oes regulares no arquivo de entrada para o Flex de modo
-que o analisador l´exico retorne o token e o lexema correspondente encontrado na entrada.
-3 Gera¸c˜ao dos analisadores sint´atico e l´exico para a linguagem
-G-V1
-Devem ser criados os arquivos de entrada para o Bison e o Flex. Os arquivos devem ser
-compilados e ligados em um ´unico execut´avel denominado g-v1. No Bloco da disciplina na
-Plataforma Turing h´a slides que explicam o uso do Bison e do Flex e h´a tamb´em um diret´orio
-compactado contendo um exemplo de como gerar analisadores l´exico e sint´atico para uma
-3
-Token Defini¸c˜ao
-PRINCIPAL principal
-IDENTIFICADOR Inicia com letra ou ’_’ seguido por zero ou mais: letras, d´ıgitos ou ’_’.
-INT int
-CAR car
-LEIA leia
-ESCREVA escreva
-NOVALINHA novalinha
-SE se
-ENTAO entao
-SENAO senao
-FIMSE fimse
-ENQUANTO enquanto
-CADEIACARACTERES Inicia e termina com " e pode ter qualquer caractere exceto \n.
-OU ||
-E &
-IGUAL ==
-DIFERENTE !=
-MAIORIGUAL >=
-MENORIGUAL <=
-CARCONST Caractere delimitado por ’. Inclui caracteres com escape: ’\n’, ’\t’, etc.
-INTCONST Constante dos n´umeros inteiros, podendo ou ter sinal (+ ou -) ou n˜ao.
-Tabela 1: Os tokens que n˜ao correspondem a apenas um caractere na linguagem G-V1. A
-tabela mostra o nome do token na primeira coluna e o padr˜ao de forma¸c˜ao dos lexemas na
-segunda coluna.
-4
-linguagem de exemplo, a SimpleLang. Na mesma pasta se encontra um exemplo de arquivo
-Makefile que pode ser adaptado para esse trabalho.
-3.1 Analisador L´exico
-A fun¸c˜ao que implementa o analisador l´exico dever´a ser gerada automaticamente, utilizandose o Flex. O Flex gera um analisador l´exico escrito na linguagem C. O Flex possui, ainda, a
-op¸c˜ao de gerar um analisador l´exico na linguagem C++.
-A fun¸c˜ao gerada (yylex()) deve ser capaz de reconhecer os tokens da gram´atica da linguagem G-V1 especificada na Se¸c˜ao 2. Os tokens correspondem aos s´ımbolos que aparecem entre
-ap´ostrofes nos lados direitos das regras da gram´atica e tamb´em aos s´ımbolos que aparecem
-escritos em letras mai´usculas na gram´atica. No ´ultimo caso, a tabela 1 descreve para cada
-um desses tokens as palavras neles contidas.
-No caso em que o token ´e uma CADEIACARACTERES ou IDENTIFICADOR, CARCONT ou INTCONST,
-a fun¸c˜ao yylex() deve obter como lexema, o texto que forma a string ou o identificador (ex.:
-x1, cont2) retornando-o no ponteiro yytext para o analisador sint´atico.
-O analisador l´exico dever´a tamb´em processar e descartar coment´arios. Os coment´arios
-podem ocupar mais de uma linha do programa fonte. Um coment´ario em G-V1 inicia com o
-par de s´ımbolos /* e termina com o par de s´ımbolos */. Um erro deve ser reportado, caso
-um coment´ario n˜ao termine.
-O analisador l´exico deve reportar, atrav´es de mensagens, erros l´exicos encontrados no
-arquivo de entrada. S˜ao exemplos de erros l´exicos: caracteres inv´alidos na linguagem, coment´arios que n˜ao terminam, cadeia de caracteres que n˜ao terminam ou que ocupam mais de
-uma linha no arquivo de entrada.
-Caso o arquivo contenha um erro l´exico, o programa dever´a imprimir uma linha contendo exatamente o seguinte: ERRO:, seguido por um espa¸co em branco e, por uma das
-seguintes mensagens de erro: CARACTERE INVALIDO ´ ou COMENTARIO NAO ´
-TERMINA ou CADEIA DE CARACTERES OCUPA MAIS DE UMA LINHA.
-Ap´os a mensagem de erro o programa deve imprimir, na mesma linha, o n´umero da linha do
-programa fonte onde o erro foi encontrado.
-Geralmente, o c´odigo obtido por uma ferramenta geradora de analisador l´exico corresponde
-a uma fun¸c˜ao na linguagem para a qual o analisador ´e gerado. Por exemplo, o Flex e o Lex
-geram uma fun¸c˜ao denominada yylex(). essa fun¸c˜ao ´e do tipo int e precisa retornar ao
-programa que a chama uma constante inteira que indica o token encontrado. A fun¸c˜ao deve
-retornar -1 (EOF) quando o fim de arquivo (padr˜ao <<EOF>>, veja manual da ferramenta) ´e
-encontrado. A fun¸c˜ao yylex() armazena em uma vari´avel global yytext o lexema encontrado
-na entrada. Essa vari´avel ´e um ponteiro para char e deve ser uma vari´avel global, pois seu
-conte´udo ser´a acessado pelo c´odigo gerado pela ferramenta e pelo programa que ir´a chamar
-a fun¸c˜ao yytext().
-Material de apoio
-• Slides da aula sobre o Flex dispon´ıveis no Bloco 1 da Plataforma Turing.
-• Gnu Flex manual
-• Pasta compactada com o exemplo de entradas para o Bison e Flex dispon´ıvel no Bloco
-2 da Plataforma Turing.
-5
-3.2 Analisador Sint´atico
-A fun¸c˜ao do compilador que implementa o analisador sint´atico pode ser gerada automaticamente utilizando-se um gerador de analisadores sint´aticos ou parsers. Neste trabalho ser´a
-utilizado o gerador Bison. O Bison utiliza o m´etodo LALR para a gera¸c˜ao do analisador
-sint´atico. Estudaremos esse m´etodo e como o Bison consegue gerar automaticamente o analisador sint´atico a partir da gram´atica de entrada na segunda etapa da disciplina. O trabalho
-de implementa¸c˜ao do analisador sint´atico consiste na prepara¸c˜ao do arquivo de entrada para
-o gerador de analisador sint´atico e na adapta¸c˜ao da fun¸c˜ao analisador sint´atico gerada (
-yyparse()) para que possa funcionar utilizando a fun¸c˜ao analisador l´exico gerada pelo Lex/-
-Flex (yylex()).
-Deve ser implementado o corpo da fun¸c˜ao yyerror(), de tal modo que erros sint´aticos
-detectados pela fun¸c˜ao yyparse() sejam emitidos na tela do computador, juntamente com o
-n´umero da linha onde o erro foi detectado. A mensagem de erro deve iniciar com a palavra
-ERRO: seguida por um espa¸co.
-E importante lembrar que os analisadores l´exico e sint´aticos s˜ao programas separados ´
-gerados na linguagem C. Eles precisam ser compilados separadamente e ligados para formarem
-um ´unico programa. Por´em, eles definem vari´aveis globais nos seus c´odigos. Para que um
-modulo m2 em C possa usar uma vari´avel ou fun¸c˜ao global definida em outro m´odulo m1,
-m2 precisa avisar ao compilador e ao ligador de c´odigo (linkeditor que o objeto a ser utilizado
-foi definido externamente, no m´odulo m1. Para isso, no m´odulo m2 a declara¸c˜ao do objeto
-a ser utilizado deve ser repetida, mas precedida pela palavra extern. As v´ari´aveis yylineno
-e yytext e a fun¸c˜ao yylex() s˜ao declaradas no arquivo em linguagem C gerado pelo Flex.
-Logo, o arquivo de entrada para o Bisson precisa ter as seguintes declara¸c˜oes:
-• extern int yylineno;
-• extern char* yytext;
-• extern int yylex();
-A vari´avel global yylineno; cont´em a linha do arquivo de entrada onde o token/lexema foi
-encontrado. A fun¸c˜ao yylex() ´e a fun¸c˜ao na linguagem C que corresponde ao analisador l´exico
-produzido pelo ferramenta geradora (Lex, Flex). Essa fun¸c˜ao tamb´em ´e definida globalmente
-no arquivo em C gerado pela ferramenta geradora de analisador l´exico utilizada. Logo, ela
-precisa ser re-declarada no arquivo de entrada para o Bison precedida por extern.
-Os objetos acima s˜ao utilizados no arquivo em linguagem C gerado pelo pelo Bison. Essa
-declara¸c˜oes devem ocorrer na primeira se¸c˜ao do arquivo de entrada, entre %{ e %}.
-A fun¸c˜ao int main(int argc, char** argv) pode ser declarada ao final do arquivo de
-entrada para o Bison/Yacc, ou em um arquivo separado. O nome do arquivo de entrada deve
-ser passado como parˆametro para o argumento argv[1] da fun¸c˜ao main(). A fun¸c˜ao main()
-deve abrir esse arquivo usando o ponteiro de arquivo definido como extern FILE *yyin;
-(pois yyin ´e declarado no c´odigo gerado pelo Flex). Dessa forma, dado que o programa
-execut´avel do analisador sint´atico tenha o nome g-v1, e supondo que o arquivo de entrada
-seja teste.g, deve ser poss´ıvel executar a an´alise sint´atica do arquivo atrav´es do seguinte
-comando em uma shell do Linux: ./g-v1 teste.g. A vari´avel global yyin ´e utilizada pela
-fun¸c˜ao yylex() gerada pela ferramenta para processar o arquivo de entrada, lendo caractere
-por caractere do mesmo e formando tokens. A fun¸c˜ao main() deve abrir o arquivo com o
-6
-nome em argv[1]} armazenando o ponteiro para o arquivo aberto em yyin (descrito acima).
-Ao t´ermino da an´alise sint´atica, o arquivo passado como parˆametro deve ser fechado.
-Material de apoio
-• Slides da aula sobre o Bison dispon´ıveis no Bloco 1 da Plataforma Turing.
-• Gnu Bison Manual
-• Pasta compactada com o exemplo de entradas para o Bison e Flex dispon´ıvel no Bloco
-2 da Plataforma Turing.
-4 Gera¸c˜ao da representa¸c˜ao intermedi´aria do programa de entrada
-A representa¸c˜ao intermedi´aria corresponde a uma ´arvore sint´atica abstrata (abstract sintax
-tree - AST) que ´e gerada durante a fase de an´alise sint´atica (ver Se¸c˜ao 2.8 e 5.3 do livrotexto 1
-). A¸c˜oes semˆanticas devem ser acrescentadas `as produ¸c˜oes da gram´atica no arquivo de
-entrada para o Bison, formando assim, o esquema de tradu¸c˜ao necess´ario para gerar a ´arvore
-abstrata para programas de entrada escritos em G-V1. A ´arvore abstrata criada deve ser
-armazenada na mem´oria principal do computador e servir´a de entrada para as fases seguintes
-que correspondem `a an´alise semˆantica e `a gera¸c˜ao de c´odigo em assembly.
-E importante que a ´arvore abstrata seja a mais compacta poss´ıvel, pois durante a fases ´
-seguintes ser´a necess´ario fazer percursos na ´arvore para detectar erros semˆanticos e gerar o
-c´odigo em linguagem assembly. Os itens l´exicos (identificadores, nomes de comandos, operadores, etc) devem ser armazenados na ´arvore juntamente com a linha onde eles ocorrem
-no programa fonte, para que as mensagens de erro possam se referir `a linha onde o erro foi
-detectado.
-Material de apoio
-• Slides da aula sobre esquema de tradu¸c˜ao dispon´ıveis no Bloco 2 da Plataforma Turing.
-• O exemplo de constru¸c˜ao de ´arvore sint´atica abstrata apresentado na Se¸c˜ao 2.8 do
-livro-texto para a linguagem SimpleLang.
-• Slides e pelos c´odigos fornecidos pelo professor (dispon´ıveis no Bloco 2 na Turing) para
-o referido exemplo.
-• Cap´ıtulo 6 do livro Introduction to Compilers and Language Desing2
-5 Tabela de S´ımbolos para a linguagem G-V1
-Conforme mostra a descri¸c˜ao da gram´atica, um bloco pode conter uma lista de declara¸c˜ao de
-vari´aveis locais (que pode ser vazia) e pode ou n˜ao ter uma lista de comandos. Por´em, um
-1Alfred Aho et al. Compiladores - Princ´ıpios, T´ecnicas e Ferramentas. segunda edi¸c˜ao, Pearson Addison
-Wesley, S˜ao Paulo, 2007.
-2https://dthain.github.io/books/compiler/
-7
-comando da lista de comandos pode ser um outro bloco. Ou seja, os blocos aninham-se uns
-dentro dos outros. Al´em disso, cada bloco que possui uma declara¸c˜ao de vari´aveis locais inicia
-um escopo novo. Essa situa¸c˜ao permite a coexistˆencia de vari´aveis distintas que possuem o
-mesmo lexema de identificador (mesmo nome), por exemplo um mesmo nome x declarado
-em um escopo mais externo e outro objeto de nome x declarado em um escopo mais interno.
-Veja explica¸c˜oes mais detalhadas no slide sobre tabelas de s´ımbolos na Plataforma Turing.
-Nesta parte do trabalho deve ser implementada uma pilha de tabela de s´ımbolos (ou tabela
-de lexemas de identificadores) capaz de armazenar lexemas de identificador. Essa estrutura
-deve ter associada a ela o seguinte conjunto de opera¸c˜oes:
-a) iniciar a pilha de tabela de s´ımbolos - opera¸c˜ao que cria uma estrutura de dados inicialmente vazia para representar a pilha de tabelas de s´ımbolos (pilha de escopos);
-b) criar uma nova tabela de s´ımbolos (novo escopo) e empilh´a-la na pilha de tabela de
-s´ımbolos.
-c) pesquisar por um nome (lexema de identificador) na pilha de tabelas de s´ımbolos. Essa
-opera¸c˜ao deve iniciar a pesquisa na tabela que est´a no topo da pilha (tabela de s´ımbolos
-correspondente ao ´ultimo escopo criado) e enquanto n˜ao encontrar, procurar nas tabelas
-seguintes, do topo em dire¸c˜ao `a base da pilha de tabelas de s´ımbolos. Deve retornar
-um ponteiro para a entrada da tabela de s´ımbolos onde o nome foi encontrado ou um
-ponteiro vazio, caso o nome procurado n˜ao se encontre na pilha de tabelas.
-d) remover escopo atual - essa fun¸c˜ao elimina a tabela de s´ımbolos que est´a no topo da
-pilha de tabelas.
-Material de apoio
-• Slides da aula sobre tabelas de s´ımblos dispon´ıveis no Bloco 2 da Plataforma Turing.
-• Cap´ıtulo 7 do livro Introduction to Compilers and Language Desing3
-6 Analisador Semˆantico
-Aspectos Semˆanticos da Linguagem G-V1
-Declara¸c˜ao de vari´aveis
-As regras de escopo e de tempo de vida das vari´aveis, da linguagem G-V1 s˜ao semelhantes `as
-regras da linguagem C, por´em h´a as seguintes restri¸c˜oes:
-• N˜ao h´a vari´aveis globais declaradas antes do programa principal, como ocorre na linguagem C (Haver´a na vers˜ao G-V2 da linguagem).
-• N˜ao h´a o conceito de vari´aveis static como na linguagem C. O tempo de vida de uma
-vari´avel local a um bloco corresponde `a dura¸c˜ao do bloco.
-• Todo programa em G-V1 ocupa apenas um arquivo e n˜ao h´a compila¸c˜ao separada.
-Portanto, n˜ao h´a declara¸c˜oes do tipo extern como na linguagem C.
-3https://dthain.github.io/books/compiler/
-8
-• Uma vari´avel declarada em um bloco ´e local a esse bloco e global a todos os blocos
-internos a esse bloco, em qualquer profundidade de aninhamento de blocos. Entretanto,
-se uma vari´avel local a um bloco tem o mesmo nome de uma vari´avel global a esse bloco,
-a vari´avel local se sobrep˜oe `a vari´avel global durante a dura¸c˜ao do bloco.
-A declara¸c˜ao de qualquer nome deve preceder o seu uso em um escopo v´alido, isto ´e, um
-nome pode ser utilizado em um comando somente se ele tiver sido declarado previamente e
-se o comando estiver no escopo de sua declara¸c˜ao.
-Tipos e Checagem de Tipos
-A linguagem G-V1 possui apenas dois tipos distintos: int e car4
-. A linguagem n˜ao permite
-opera¸c˜oes entre objetos ou express˜oes de tipo simples (car ou int) distintos.
-A express˜ao do lado direito de uma atribui¸c˜ao deve ter o mesmo tipo da vari´avel que
-recebe a express˜ao. Os operadores aritm´eticos devem ser aplicados em express˜oes do tipo
-int. Os operadores relacionais devem ser aplicados a operandos de mesmo tipo.
-N˜ao existe o tipo l´ogico expl´ıcito na linguagem G-V1, entretanto nos comandos se e
-enquanto ´e necess´ario avaliar se uma express˜ao ´e verdadeira ou falsa para a tomada de uma
-decis˜ao quanto ao fluxo de execu¸c˜ao dos comandos internos a estes dois comandos. Assim
-como a linguagem C, a linguagem G-V1 trata como verdadeira uma express˜ao cujo valor ´e
-diferente de zero e como falsa, uma express˜ao cujo valor ´e zero. Obviamente, essa avalia¸c˜ao
-´e poss´ıvel somente em tempo de execu¸c˜ao do programa fonte. Entretanto, a n´ıvel de an´alise
-semˆantica, uma express˜ao l´ogica ( com opera¸c˜oes OR, AND ou NEGAC¸ AO) ou relacional ( ˜
-com operadores relacionais – >, <,<=, etc) devem receber tipo int.
-O analisador semˆantico deve percorrer a ´arvore abstrata gerada para uma cadeia de entrada (programa escrito em G-V1) para realizar a an´alise semˆantica. Um programa sintaticamente correto corresponde a um ou mais blocos. Um bloco possui zero ou mais declara¸c˜oes
-de vari´aveis seguida por uma lista de comandos. Um comando pode ser outro bloco. Essa estrutura hier´arquica da linguagem faz com que na ´arvore abstrata, em um bloco mais externo,
-as declara¸c˜oes de vari´aveis apare¸cam na sub´arvore `a esquerda da sub´arvore correspondente
-`a lista de comando do bloco. Se nesse bloco, (sub´arvore direita) ocore em algum momento
-outro bloco, na sub´arvore a ele correspondente, as declara¸c˜oes de vari´aveis desse bloco interno
-ficam em uma sub´arvore esquerda e a lista de comando fica na sub´arvore `a direita. Portanto,
-o controle de escopo e toda a an´alise semˆantica podem ser realizados atrav´es de um percurso
-que se inicia na raiz da AST em dire¸c˜ao `as folhas e da esquerda para a direita.
-No percurso em uma ´arvore/sub´arvore correspondente a um bloco, o analisador encontrar´a
-primeiro as declara¸c˜oes de vari´aveis. Com isso ele pode criar uma nova tabela de s´ımbolos
-(novo escopo) correspondente `a declara¸c˜ao e ir incluindo os identificadores de vari´avis e seus
-respectivos tipos na tabela criada. Ao iniciar um percurso numa sub´avore que corresponde a
-uma lista de comandos do bloco, os identificadores v´alidos encontrados nos comando devem
-estar em uma das tabelas de s´ımbolos da pilha de tabelas de s´ımbolos. No topo, estar´a a
-tabela de s´ımbolos das ´ultimas declarac¸c˜oes visitadas na AST e, na base, os identificadores
-poss´ıvelmente declarados no bloco mais externo da fun¸c˜ao principal.
-Ao terminar um percurso em uma ´arvore/sub´arvore correspondente a um bloco, a tablea
-de s´ımbolos do topo da pilha (escopo atual ) ´e removida. Esse percurso permite checar,
-gradualmente, a corre¸c˜ao semˆantica de cada constru¸c˜ao presente na ´arvore, seguindo as regras
-4Na vers˜ao 2 da linguagem, haver´a o tipo vetor (array) de int e de car.
-9
-semˆanticas apresentadas nesta se¸c˜ao. Qualquer ocorrˆencia de uma constru¸c˜ao no programa
-fonte que n˜ao ´e permitida na linguagem G-V1 deve ser considerada um erro semˆantico. Nesse
-caso, o analisador semˆantico deve reportar o erro semˆantico encontrado, o n´umero da linha
-onde ele ocorreu e terminar a compila¸c˜ao.
-N˜ao h´a um material de apoio espec´ıfico para esta fase. O(s) aluno(s) devem recorrer aos
-seus conhecimentos de Estrutura de Dados para realizar o percurso na ´arvore e ir manipulando
-a pilha de tabela de s´ımbolos, `a medida que o percurso ocorre.
-7 Gera¸c˜ao de c´odigo
-Se o programa de entrada estiver semanticamente correto, outro algoritmo de percurso deve
-ser iniciado na AST. Desta vez, o percurso ser´a com o objetivo de gerar c´odigo. Nesse novo
-percurso, tabelas de s´ımbolos devem ser criadas e empilhadas na pilha de tabelas `a medida
-que o percurso encontra sub´arvores de declara¸c˜oes de vari´aveis. Tamb´em como ocorre durante
-o percurso de an´alise semˆantica, uma tabela ´e eliminada do topo da pillha ao final de uma
-sub´arvore correspondente a um bloco, se houve pelo menos uma declara¸c˜ao de vari´aveis nesse
-bloco. Como o programa est´a semanticamente correto, as informa¸c˜oes na tabela n˜ao servem
-para checagem de escopo e tipo, mas sim, para identificar as posi¸c˜oes de cada vari´avel na
-mem´oria e tamb´em o tamanho do espa¸co a ser alocado para cada vari´avel (indicado pelo seu
-tipo).
-Material de apoio
-• Slides da aula sobre gera¸c˜ao de c´odigo, dispon´ıveis no Bloco 2 da Plataforma Turing.
-• MIPS Assembly Language Programming (pdf dispon´ıvel na Platarfoma Turing).
-8 Informa¸c˜oes Sobre a Implementa¸c˜ao e a Entrega
-O trabalho pode ser desenvolvido em grupo de dois alunos e deve ser entregue at´e o dia
-07/05/2026 via tarefa criada no site da disciplina na plataforma Turing. O trabalho deve ser
-apresentado durante as aulas dos dias 27/04/206, 30/04/2026 e 04/05/2026 pela turma de
-Ciˆencia da Computa¸c˜ao e nos dias 30/04/2026, 05/05/2026 e 07/05/2026 pela turma de Engenharia de Computa¸cao. Os trabalho s˜ao totalmente fact´ıveis individualmente. Portanto, se
-um dos componentes abandonar o grupo, o outro deve continuar os trabalho individualmente
-e apresent´a-lo nas datas marcadas.
-Deve ser entregue uma pasta compactada contendo:
-• O arquivo de especifica¸c˜oes para o gerador de analisador l´exico utilizado (arquivo de
-entrada para o Flex/Lex - g-v1.l).
-• O arquivo de especifica¸c˜oes para o gerador de analisador sint´atico expandido com a¸c˜oes
-semˆanticas necess´arias para a gera¸c˜ao de ´arvore sint´atica abstrata (arquivo de entrada
-para o Yacc/Bison - g-v1.y).
-• O c´odigo em C/C++ que implementa a tabela de s´ımbolos e o arquivo headerfile correspondente.
-10
-• O c´odigo em C/C++ do analisador semˆantico que ir´a utilizar a ´arvore abstrata e a
-tabela de s´ımbolos para detectar a ocorrˆencia de erros semˆanticos em arquivos contendo
-programas escritos na linguagem Goianinha ( e headerfile correspondente).
-• O c´odigo me C/C++ que ir´a utilizar a ´arvore abstrata e a tabela de s´ımbolos para gerar
-o c´odigo objeto em linguagem assembly.
-• Um arquivo Makefile com comandos para:
-– Gerar o c´odigo do analisador l´exico a partir do arquivo contendo as especifica¸c˜oes
-para o gerador de analisador l´exico.
-– Gerar o c´odigo do analisador sint´atico e construtor da ´arvore abstrata a partir do
-arquivo contendo as especifica¸c˜oes para o gerador de analisador sint´atico.
-– Compilar os arquivos gerados e os escritos na linguagem de programa¸c˜ao adotada
-no projeto (C/C++).
-– Gerar o execut´avel (O professor deve ser capaz de obter o execut´avel do trabalho
-digitando apenas o comando make em uma shell do Linux).
-A pasta compactada deve ser submetida como uma tarefa a ser criada no site da disciplina.
-Os c´odigos gerados devem estar preparados para executarem no sistema operacional Linux
-(ambiente onde os trabalhos ser˜ao avaliados). O compilador C/C++ utilizado pelo professor
-para compilar os c´odigos ser´a o gcc/g++ na vers˜ao 14. O Flex utilizado ser´a o de vers˜ao
-2.6.4. O Bison utilizado ser´a o de vers˜ao 3.8.2.
-Sugest˜ao de Cronograma
-Para que o grupo consiga concluir o trabalho no prazo previsto (27/04/2026), sugere-se o
-seguinte cronograma, que atribui dias a cada fase de implementa¸c˜ao do trabalho, de acordo
-com a complexidade da fase:
-Tarefa Data Final Num. Dias
-Analisadores l´exicos e sint´aticos integrados 21/03/2026 8
-Gera¸c˜ao da AST 31/03/2026 10
-Implementa¸c˜ao da tabela de s´ımbolos 11/04/2026 11
-An´alisador semˆantico 18/04/2026 7
-Gera¸c˜ao de c´odigo 26/04/2026 8
-Tabela 2: Cronograma sugerido.
-Importante:
-C´opias idˆenticas ou modificadas dos c´odigos ou de partes dos c´odigos s˜ao consideradas pl´agios.
-Pl´agio ´e crime. O aluno que cometer pl´agio em seu trabalho receber´a nota zero no mesmo.
-SE O COMPILADOR GERADO ESTIVER CORRETO, MAS O ALUNO NAO˜
-O APRESENTAR OU NAO SOUBER EXPLICAR O TRABALHO, RECE- ˜
-BERA NOTA ZERO NO MESMO ´ .
-11
+Fala Pedro! [cite_start]Implementar um compilador do zero é um desafio e tanto, especialmente com as exigências do INF e o prazo de entrega final marcado para 07/05/2026[cite: 203]. [cite_start]Como o professor Thierson permite grupos de até dois alunos[cite: 203], talvez seja o momento ideal para puxar o Jhonatas para dividir essas tarefas. [cite_start]Além disso, como você já utiliza o Ubuntu, o ambiente Linux exigido para compilar e avaliar o trabalho com o `gcc/g++` 14 já está pronto[cite: 219, 220]. 
+
+[cite_start]Como estamos no dia 12 de abril, o cronograma sugerido na especificação aponta que você já deveria estar finalizando a tabela de símbolos[cite: 224]. Vamos precisar de um ritmo ágil. 
+
+Abaixo está o plano de implementação detalhado, dividido em fases isoladas. Esta estrutura é otimizada para que você possa pedir ajuda às IAs passo a passo, sem sobrecarregar o contexto do modelo.
+
+### Fase 1: Análise Léxica (O arquivo Flex)
+Esta fase transforma o código-fonte em *tokens*.
+* [cite_start]**O que pedir para a IA:** "Crie um arquivo `g-v1.l` para o Flex[cite: 207]. [cite_start]Quero expressões regulares para identificar os tokens definidos na linguagem G-V1, como palavras reservadas (PRINCIPAL, INT, CAR), operadores, e os padrões de IDENTIFICADOR e CADEIACARACTERES[cite: 58]."
+* [cite_start]**Detalhes críticos para focar:** * A função `yylex()` gerada deve retornar o token e salvar lexemas em `yytext`[cite: 67, 69].
+    * [cite_start]É obrigatório ignorar comentários (que começam com `/*` e terminam com `*/`) mesmo que ocupem várias linhas[cite: 70, 71].
+    * [cite_start]O tratamento de erros deve ser exato: imprimir `ERRO: ` seguido de `CARACTERE INVÁLIDO`, `COMENTÁRIO NAO TERMINA` ou `CADEIA DE CARACTERES OCUPA MAIS DE UMA LINHA`, além do número da linha[cite: 75, 76].
+
+### Fase 2: Análise Sintática (O arquivo Bison)
+Esta fase valida a estrutura do código com base na gramática.
+* [cite_start]**O que pedir para a IA:** "Crie um arquivo `g-v1.y` para o Bison[cite: 208]. [cite_start]Transcreva a gramática LALR da linguagem G-V1, mapeando declarações de variáveis, blocos e expressões[cite: 14, 20, 91]."
+* **Detalhes críticos para focar:**
+    * [cite_start]O Bison precisará das declarações `extern int yylineno;`, `extern char* yytext;` e `extern int yylex();` para se comunicar corretamente com o Flex[cite: 99, 100, 101].
+    * [cite_start]A função de erro `yyerror()` deve ser customizada para exibir a mensagem iniciando com a palavra `ERRO: ` e a linha do problema[cite: 94, 95].
+
+### Fase 3: Árvore Sintática Abstrata (AST)
+Aqui, o Bison deixará de apenas validar o código e passará a construir uma estrutura de dados em memória.
+* [cite_start]**O que pedir para a IA:** "Crie as `structs` ou classes em C/C++ para representar a AST da G-V1[cite: 122]. [cite_start]Depois, adicione as ações semânticas no arquivo do Bison para instanciar e conectar os nós à medida que a gramática é reduzida[cite: 123]."
+* **Detalhes críticos para focar:**
+    * [cite_start]A árvore precisa ser compacta[cite: 125].
+    * [cite_start]É essencial que os nós armazenem a linha onde os itens léxicos ocorreram para futuras mensagens de erro[cite: 126].
+
+### Fase 4: Tabela de Símbolos e Escopo
+Esta é a estrutura de dados que gerencia a visibilidade das variáveis.
+* [cite_start]**O que pedir para a IA:** "Implemente em C/C++ uma Pilha de Tabelas de Símbolos[cite: 141]. [cite_start]Ela deve ter operações para: iniciar a pilha, empilhar um novo escopo, pesquisar um nome (do topo para a base) e remover o escopo atual[cite: 143, 144, 145, 146, 148]."
+* **Detalhes críticos para focar:**
+    * [cite_start]Sempre que um bloco inicia com declarações, um novo escopo é criado e empilhado[cite: 138]. [cite_start]Variáveis locais se sobrepõem às globais do mesmo nome durante a duração do bloco[cite: 163].
+
+### Fase 5: Analisador Semântico
+Este passo percorre a AST garantindo que o programa faz sentido logicamente.
+* [cite_start]**O que pedir para a IA:** "Escreva uma função que percorre a AST do bloco mais externo para o mais interno[cite: 180]. [cite_start]Integre esta função com a Pilha de Tabelas de Símbolos para validar declarações e checar tipos[cite: 182, 186]."
+* **Detalhes críticos para focar:**
+    * [cite_start]Uma variável só pode ser usada se já foi declarada[cite: 164].
+    * [cite_start]Operações entre tipos diferentes (`int` e `car`) são proibidas[cite: 166, 167]. 
+    * [cite_start]Se houver falha, reporte o erro e termine a compilação[cite: 190].
+
+### Fase 6: Geração de Código MIPS
+[cite_start]A última etapa lógica do compilador, executada apenas se não houver erros semânticos[cite: 194].
+* [cite_start]**O que pedir para a IA:** "Crie um segundo percurso na AST para gerar código[cite: 194, 195]. [cite_start]Use a tabela de símbolos para calcular a posição de memória e o tamanho das variáveis [cite: 198] [cite_start]e emita as instruções em Assembly MIPS[cite: 201]."
+
+### Fase 7: Automação (Makefile)
+Para o professor conseguir compilar e testar.
+* [cite_start]**O que pedir para a IA:** "Crie um `Makefile` que gere o analisador léxico, o sintático, compile todos os arquivos C/C++ e gere um executável chamado `g-v1` usando o comando padrão `make`[cite: 214, 215, 216, 217]."
+
+---
+
+Para que a gente comece efetivamente a escrever o código juntos, por qual componente você prefere iniciar hoje: quer que eu já rascunhe as expressões regulares do Flex (Fase 1) ou você quer começar projetando as estruturas de dados da AST (Fase 3)?
