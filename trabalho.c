@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Estrutura geral:
+ * - Lexer manual: converte o arquivo em tokens.
+ * - Parser recursivo descendente: valida a gramática G-V1.
+ * - Em qualquer erro, imprime "ERRO: <mensagem> <linha>" e encerra.
+ */
 typedef enum {
     TOK_EOF = -1,
     TOK_INVALID = 0,
@@ -304,6 +309,9 @@ static Token next_token(void) {
             ungetc(lookahead, yyin);
         }
 
+        /* Sinal faz parte de INTCONST só quando inicia um novo fator/expressão.
+         * Ex.: "x = -10" (constante) vs "x-10" (operador '-').
+         */
         if (lookahead != EOF && isdigit(lookahead) && !token_can_end_expression(previous_token)) {
             return lex_intconst(true);
         }
@@ -446,7 +454,8 @@ static void parse_add_expr(void) {
     }
 }
 
-static void parse_desig_expr(void) {
+/* Operadores relacionais: <, >, <=, >= */
+static void parse_rel_expr(void) {
     parse_add_expr();
     while (current_token.type == TOK_LT || current_token.type == TOK_GT ||
            current_token.type == TOK_MAIORIGUAL || current_token.type == TOK_MENORIGUAL) {
@@ -456,10 +465,10 @@ static void parse_desig_expr(void) {
 }
 
 static void parse_eq_expr(void) {
-    parse_desig_expr();
+    parse_rel_expr();
     while (current_token.type == TOK_IGUAL || current_token.type == TOK_DIFERENTE) {
         advance_token();
-        parse_desig_expr();
+        parse_rel_expr();
     }
 }
 
@@ -480,6 +489,10 @@ static void parse_or_expr(void) {
 }
 
 static void parse_expr(void) {
+    /* Implementa:
+     * Expr -> IDENTIFICADOR '=' Expr | OrExpr
+     * Fazemos lookahead para distinguir atribuição de expressão comum.
+     */
     if (current_token.type == TOK_IDENTIFICADOR) {
         ParserState state = save_parser_state();
         advance_token();
@@ -531,6 +544,10 @@ static bool looks_like_var_section_after_first_lbrace(void) {
         return false;
     }
 
+    /* Lookahead sem consumir definitivo:
+     * identifica se estamos em "{ ListaDeclVar } { ListaComando }"
+     * ou apenas "{ ListaComando }".
+     */
     ParserState state = save_parser_state();
     bool is_var_section = true;
 
