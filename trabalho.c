@@ -411,10 +411,7 @@ typedef struct {
     Token current;
 } Parser;
 
-typedef struct {
-    Lexer lexer;
-    Token current;
-} ParserState;
+typedef Parser ParserState;
 
 static void free_token(Token *tk) {
     if (tk->lexeme) free(tk->lexeme);
@@ -914,7 +911,11 @@ static Scope *push_scope(Scope *top) {
 
 static Scope *pop_scope(Scope *top) {
     Scope *p = top->prev;
-    top->symbols = NULL;
+    while (top->symbols) {
+        Sym *n = top->symbols->next;
+        free(top->symbols);
+        top->symbols = n;
+    }
     free(top);
     return p;
 }
@@ -1230,7 +1231,7 @@ static void emit_expr(CodegenCtx *cg, Expr *e) {
         case EX_VAR: {
             Sym *sym = cg_lookup(cg, e->as.name);
             if (sym->type == TYPE_INT) fprintf(cg->out, "  lw $v0, %d($fp)\n", sym->offset);
-            else fprintf(cg->out, "  lb $v0, %d($fp)\n", sym->offset);
+            else fprintf(cg->out, "  lbu $v0, %d($fp)\n", sym->offset);
             return;
         }
         case EX_ASSIGN: {
