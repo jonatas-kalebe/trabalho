@@ -378,7 +378,6 @@ static Token next_token(void) {
             report_error_and_exit("CARACTERE INVALIDO", line);
     }
 
-    return make_token(TOK_INVALID, "", yylineno);
 }
 
 static void advance_token(void) {
@@ -534,10 +533,6 @@ static bool looks_like_var_section_after_first_lbrace(void) {
 
     ParserState state = save_parser_state();
     bool is_var_section = true;
-
-    if (current_token.type != TOK_IDENTIFICADOR) {
-        is_var_section = false;
-    }
 
     while (is_var_section) {
         if (current_token.type != TOK_IDENTIFICADOR) {
