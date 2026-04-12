@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* =========================
+ * Léxico: tokens e scanner
+ * ========================= */
 typedef enum {
     TOK_EOF = -1,
     TOK_INVALID = 0,
@@ -406,10 +409,19 @@ typedef struct {
     Block *block;
 } Program;
 
+/* ============================
+ * Parser (descida recursiva)
+ * ============================ */
 typedef struct {
     Lexer lexer;
     Token current;
 } Parser;
+
+typedef struct {
+    size_t pos;
+    int line;
+    Token current;
+} ParserCheckpoint;
 
 static void free_token(Token *tk) {
     if (tk->lexeme) free(tk->lexeme);
@@ -656,29 +668,32 @@ static Stmt *parse_command_list(Parser *p) {
     return head;
 }
 
-static void parser_state_save(Parser *p, Parser *st) {
-    st->lexer = p->lexer;
-    st->current = p->current;
-    if (p->current.lexeme) st->current.lexeme = xstrdup(p->current.lexeme);
+/* Salva apenas o estado necessário para voltar ao mesmo ponto do input. */
+static void parser_checkpoint_save(Parser *p, ParserCheckpoint *cp) {
+    cp->pos = p->lexer.pos;
+    cp->line = p->lexer.line;
+    cp->current = p->current;
+    if (p->current.lexeme) cp->current.lexeme = xstrdup(p->current.lexeme);
 }
 
-static void parser_state_restore(Parser *p, Parser *st) {
+static void parser_checkpoint_restore(Parser *p, ParserCheckpoint *cp) {
     free_token(&p->current);
-    p->lexer = st->lexer;
-    p->current = st->current;
+    p->lexer.pos = cp->pos;
+    p->lexer.line = cp->line;
+    p->current = cp->current;
 }
 
 static int try_parse_var_section(Parser *p, Decl **out_decls) {
-    Parser st;
-    parser_state_save(p, &st);
+    ParserCheckpoint cp;
+    parser_checkpoint_save(p, &cp);
 
     if (p->current.kind != TOK_LBRACE) {
-        free_token(&st.current);
+        free_token(&cp.current);
         return 0;
     }
     parser_advance(p);
     if (p->current.kind != TOK_IDENT) {
-        parser_state_restore(p, &st);
+        parser_checkpoint_restore(p, &cp);
         return 0;
     }
 
@@ -686,6 +701,7 @@ static int try_parse_var_section(Parser *p, Decl **out_decls) {
     Decl *tail = NULL;
 
     while (1) {
+        /* IDENTIFICADOR (',' IDENTIFICADOR)* ':' Tipo ';' */
         char **names = NULL;
         int names_cap = 0;
         int names_sz = 0;
@@ -693,7 +709,7 @@ static int try_parse_var_section(Parser *p, Decl **out_decls) {
 
         while (1) {
             if (p->current.kind != TOK_IDENT) {
-                parser_state_restore(p, &st);
+                parser_checkpoint_restore(p, &cp);
                 return 0;
             }
             if (names_sz == names_cap) {
@@ -711,7 +727,7 @@ static int try_parse_var_section(Parser *p, Decl **out_decls) {
         if (p->current.kind != TOK_COLON) {
             for (int i = 0; i < names_sz; i++) free(names[i]);
             free(names);
-            parser_state_restore(p, &st);
+            parser_checkpoint_restore(p, &cp);
             return 0;
         }
         parser_advance(p);
@@ -726,14 +742,14 @@ static int try_parse_var_section(Parser *p, Decl **out_decls) {
         } else {
             for (int i = 0; i < names_sz; i++) free(names[i]);
             free(names);
-            parser_state_restore(p, &st);
+            parser_checkpoint_restore(p, &cp);
             return 0;
         }
 
         if (p->current.kind != TOK_SEMICOLON) {
             for (int i = 0; i < names_sz; i++) free(names[i]);
             free(names);
-            parser_state_restore(p, &st);
+            parser_checkpoint_restore(p, &cp);
             return 0;
         }
         parser_advance(p);
@@ -752,17 +768,17 @@ static int try_parse_var_section(Parser *p, Decl **out_decls) {
     }
 
     if (p->current.kind != TOK_RBRACE) {
-        parser_state_restore(p, &st);
+        parser_checkpoint_restore(p, &cp);
         return 0;
     }
     parser_advance(p);
 
     if (p->current.kind != TOK_LBRACE) {
-        parser_state_restore(p, &st);
+        parser_checkpoint_restore(p, &cp);
         return 0;
     }
 
-    free_token(&st.current);
+    free_token(&cp.current);
     *out_decls = head;
     return 1;
 }
@@ -772,6 +788,11 @@ static Block *parse_block(Parser *p) {
     int line = p->current.line;
 
     Decl *decls = NULL;
+    /* Bloco pode ser:
+     *   { ListaComando }
+     * ou
+     *   { ListaDeclVar } { ListaComando }
+     */
     if (try_parse_var_section(p, &decls)) {
         parser_expect(p, TOK_LBRACE, "ERRO SINTATICO");
         Stmt *cmds = parse_command_list(p);
@@ -891,6 +912,9 @@ typedef struct {
     Scope *top;
 } SemanticCtx;
 
+/* ============================
+ * Semântico (escopo e tipos)
+ * ============================ */
 static int type_size(Type t) {
     return (t == TYPE_INT) ? 4 : 1;
 }
@@ -934,6 +958,7 @@ static Sym *lookup_all(Scope *top, const char *name) {
 }
 
 static void add_symbol(Scope *scope, char *name, Type type, int line) {
+    /* add_symbol recebe a posse de 'name' e libera ao destruir o escopo. */
     if (lookup_scope(scope, name)) semantic_error(line, "IDENTIFICADOR JA DECLARADO");
     Sym *s = (Sym *)calloc(1, sizeof(Sym));
     if (!s) die_alloc();
@@ -1085,6 +1110,9 @@ typedef struct {
     int depth;
 } CodegenCtx;
 
+/* ============================
+ * Geração de código MIPS
+ * ============================ */
 static Sym *cg_lookup(CodegenCtx *cg, const char *name) {
     for (CGScope *s = cg->top; s; s = s->prev) {
         for (Sym *it = s->symbols; it; it = it->next) {
@@ -1229,6 +1257,7 @@ static void emit_expr(CodegenCtx *cg, Expr *e) {
         case EX_VAR: {
             Sym *sym = cg_lookup(cg, e->as.name);
             if (sym->type == TYPE_INT) fprintf(cg->out, "  lw $v0, %d($fp)\n", sym->offset);
+            /* 'car' usa lbu para evitar extensão de sinal indevida. */
             else fprintf(cg->out, "  lbu $v0, %d($fp)\n", sym->offset);
             return;
         }
@@ -1399,7 +1428,7 @@ static char *read_file(const char *path) {
     rewind(f);
     char *buf = (char *)malloc((size_t)sz + 1);
     if (!buf) die_alloc();
-    if (sz > 0 && fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
+    if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
         fclose(f);
         free(buf);
         printf("ERRO: NAO FOI POSSIVEL LER ARQUIVO\n");
