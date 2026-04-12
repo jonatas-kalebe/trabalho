@@ -411,8 +411,6 @@ typedef struct {
     Token current;
 } Parser;
 
-typedef Parser ParserState;
-
 static void free_token(Token *tk) {
     if (tk->lexeme) free(tk->lexeme);
     tk->lexeme = NULL;
@@ -658,20 +656,20 @@ static Stmt *parse_command_list(Parser *p) {
     return head;
 }
 
-static void parser_state_save(Parser *p, ParserState *st) {
+static void parser_state_save(Parser *p, Parser *st) {
     st->lexer = p->lexer;
     st->current = p->current;
     if (p->current.lexeme) st->current.lexeme = xstrdup(p->current.lexeme);
 }
 
-static void parser_state_restore(Parser *p, ParserState *st) {
+static void parser_state_restore(Parser *p, Parser *st) {
     free_token(&p->current);
     p->lexer = st->lexer;
     p->current = st->current;
 }
 
 static int try_parse_var_section(Parser *p, Decl **out_decls) {
-    ParserState st;
+    Parser st;
     parser_state_save(p, &st);
 
     if (p->current.kind != TOK_LBRACE) {
@@ -935,11 +933,11 @@ static Sym *lookup_all(Scope *top, const char *name) {
     return NULL;
 }
 
-static void add_symbol(Scope *scope, const char *name, Type type, int line) {
+static void add_symbol(Scope *scope, char *name, Type type, int line) {
     if (lookup_scope(scope, name)) semantic_error(line, "IDENTIFICADOR JA DECLARADO");
     Sym *s = (Sym *)calloc(1, sizeof(Sym));
     if (!s) die_alloc();
-    s->name = (char *)name;
+    s->name = name;
     s->type = type;
     s->size = type_size(type);
     s->next = scope->symbols;
