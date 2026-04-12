@@ -454,8 +454,8 @@ static void parse_add_expr(void) {
     }
 }
 
-/* Operadores relacionais: <, >, <=, >= */
-static void parse_rel_expr(void) {
+/* Parser de expressão relacional: <, >, <=, >= */
+static void parse_relational_expr(void) {
     parse_add_expr();
     while (current_token.type == TOK_LT || current_token.type == TOK_GT ||
            current_token.type == TOK_MAIORIGUAL || current_token.type == TOK_MENORIGUAL) {
@@ -465,10 +465,10 @@ static void parse_rel_expr(void) {
 }
 
 static void parse_eq_expr(void) {
-    parse_rel_expr();
+    parse_relational_expr();
     while (current_token.type == TOK_IGUAL || current_token.type == TOK_DIFERENTE) {
         advance_token();
-        parse_rel_expr();
+        parse_relational_expr();
     }
 }
 
