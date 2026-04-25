@@ -21,8 +21,7 @@ int main(int argc, char** argv) {
     }
     yyin = f;
     
-    extern int yylineno;
-    yylineno = 1;
+    // Inicializacao do lexer customizado (se necessario)
 
     //printf("Compilador G-V1 - Iniciando...\n");
     if (yyparse() == 0) {
