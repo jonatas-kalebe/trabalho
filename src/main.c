@@ -20,6 +20,9 @@ int main(int argc, char** argv) {
         return 1;
     }
     yyin = f;
+    
+    extern int yylineno;
+    yylineno = 1;
 
     //printf("Compilador G-V1 - Iniciando...\n");
     if (yyparse() == 0) {
