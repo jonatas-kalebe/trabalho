@@ -184,9 +184,8 @@ Expr:
 
 %%
 
-extern int token_line;
-
 void yyerror(const char *s) {
-    printf("ERRO: %s %d\n", "SINTATICO", token_line);
+    extern int yylineno;
+    printf("ERRO: %s %d\n", "SINTATICO", yylineno > 1 ? yylineno - 1 : 1);
     exit(1);
 }
