@@ -62,6 +62,42 @@ Mensagem para banca:
 
 ---
 
+## 5.1 Entendendo o Parser do zero (Bison sem mistério)
+
+Se o professor perguntar do parser, você pode explicar assim:
+
+1. O parser trabalha com **tokens** que vêm do lexer (`yylex()`).
+2. Em `parser.y`, cada regra tem formato:
+   - `NaoTerminal: producao1 | producao2 ... ;`
+3. Quando uma produção casa, o bloco `{ ... }` executa e cria/encadeia nós.
+
+Conceitos fundamentais de Bison no seu arquivo:
+- **`%token`**: declara quais tokens existem.
+- **`%union`**: define os tipos de valor semântico que cada símbolo pode carregar.
+- **`%type`**: diz qual campo da union cada não-terminal usa.
+- **`$1`, `$2`, ...**: valores dos itens da direita da regra.
+- **`$$`**: valor produzido pela regra (lado esquerdo).
+- **`%left`, `%right` e `%prec`**: resolvem precedência e associatividade.
+
+Exemplo explicado:
+- Regra: `Expr TOK_PLUS Expr`
+- Ação: cria `new_expr_binary(OP_ADD, $1, $3, ...)`
+- Interpretação: se reconheci `expressão + expressão`, monto um nó de soma na AST.
+
+### Como explicar as principais regras do seu parser
+
+1. `Programa`: regra inicial; ancora resultado em `root_program`.
+2. `Block`: reconhece bloco com/sem declarações e cria `new_block`.
+3. `VarDeclList`/`VarDecl`: converte `a, b, c : int;` em lista de `Decl`.
+4. `Comando`: reconhece estruturas imperativas (`if`, `while`, `leia`, `escreva` etc.).
+5. `Expr`: reconhece expressões e cria nós respeitando precedência.
+
+### Ponto que professor costuma cobrar
+“Como você diferencia `-x` de `a - b`?”
+- Resposta: usando `%prec UMINUS` no parser para tratar o menos unário com precedência adequada.
+
+---
+
 ## PARTE 3 — AST explicada como se você fosse ensinar
 
 ## 6. O que é AST?
@@ -253,4 +289,3 @@ Frase final forte:
 3. Mais tipos e coerções explícitas.
 4. Funções/procedimentos e parâmetros.
 5. Testes automatizados com casos positivos e negativos.
-
