@@ -5,10 +5,11 @@
 #include "ast.h"
 
 /*
- * O que a estrutura faz: Define um nó (variável) na Tabela de Símbolos.
- * Papel no Pipeline: Semântico (Manutenção de Estado).
- * Regra da G-V1: Retenção do tipo (int/car) e do deslocamento na pilha (offset).
- * Dica para a Banca: "Armazenamos o size e offset aqui para que a tabela de símbolos já deixe a cama pronta para os cálculos de fp e sp na geração de MIPS."
+ * Entrada da tabela de símbolos.
+ * Cada identificador declarado no programa gera um Sym com:
+ * - name: lexema do identificador
+ * - type: tipo semântico (int/car)
+ * - offset/size: metadados úteis para endereçamento em stack frame
  */
 typedef struct Sym {
     char *name;
@@ -19,10 +20,9 @@ typedef struct Sym {
 } Sym;
 
 /*
- * O que a estrutura faz: Representa um nível de escopo, empilhando variáveis visíveis no bloco atual.
- * Papel no Pipeline: Semântico (Contexto).
- * Regra da G-V1: O controle de escopo deve respeitar variáveis locais sobrepondo globais ao bloco (shadowing).
- * Dica para a Banca: "Como usamos uma pilha encadeada de scopes, o shadowing acontece de graça: a busca para no primeiro nível em que achar a variável."
+ * Um Scope representa um bloco léxico.
+ * scopes formam uma pilha encadeada:
+ * bloco interno -> bloco externo -> ...
  */
 typedef struct Scope {
     Sym *symbols;
@@ -40,10 +40,8 @@ typedef struct {
 } SemanticCtx;
 
 /*
- * O que o método faz: Informa o tamanho em bytes de cada tipo primitivo.
- * Papel no Pipeline: Semântico -> Gerador de Código MIPS.
- * Regra da G-V1: Gerenciamento de memória na pilha MIPS.
- * Dica para a Banca: "Alocamos 4 bytes pro INT e 1 byte pro CAR, sendo fiéis à arquitetura base do MIPS32."
+ * Converte tipo semântico em tamanho de armazenamento.
+ * Esta decisão impacta cálculo de offset para variáveis.
  */
 static int type_size(Type t) {
     return (t == TYPE_INT) ? 4 : 1;
@@ -59,10 +57,7 @@ static void semantic_error(int line, const char *msg) {
 }
 
 /*
- * O que o método faz: Empilha um novo nível de escopo na estrutura do contexto semântico.
- * Papel no Pipeline: Semântico.
- * Regra da G-V1: Controle de blocos ({ }).
- * Dica para a Banca: "Sempre que entramos em um curly brace, chamamos esse método pra criar o ambiente isolado de novas variáveis."
+ * Abre escopo novo (entrada em bloco).
  */
 static Scope *push_scope(Scope *top) {
     Scope *s = (Scope *)calloc(1, sizeof(Scope));
@@ -72,10 +67,7 @@ static Scope *push_scope(Scope *top) {
 }
 
 /*
- * O que o método faz: Remove e libera a memória do escopo atual ao sair de um bloco.
- * Papel no Pipeline: Semântico.
- * Regra da G-V1: Fechamento de controle de escopo e destruição de variáveis temporárias do bloco.
- * Dica para a Banca: "Limpamos a memória da tabela local para não vazar memória no próprio compilador e forçamos o abandono das variáveis daquele bloco."
+ * Fecha escopo atual (saída de bloco), liberando símbolos locais.
  */
 static Scope *pop_scope(Scope *top) {
     Scope *p = top->prev;

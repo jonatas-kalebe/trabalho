@@ -1,145 +1,256 @@
-# Guia de Estudo e Apresentação do Compilador (passo a passo)
+# Manual Completo de Estudo + Roteiro de Defesa do Compilador G-V1
 
-## 1) Objetivo do projeto em 1 frase
-Este compilador lê um programa na linguagem G-V1 e transforma em código MIPS, passando por **análise léxica**, **sintática**, **semântica** e **geração de código**.
-
----
-
-## 2) Roteiro de apresentação (10 a 15 minutos)
-
-### Bloco A — Visão geral (1 min)
-Fale isso:
-1. “Meu compilador recebe um arquivo `.g`.”
-2. “Converte o texto em estrutura de árvore (AST).”
-3. “Valida regras de tipo e escopo.”
-4. “Gera assembly MIPS no final.”
-
-### Bloco B — Pipeline completo (3 min)
-Use esta sequência obrigatória:
-1. **Lexer (`src/lexer.l`)**: quebra texto em tokens (identificadores, números, símbolos).
-2. **Parser (`src/parser.y`)**: valida gramática e monta AST.
-3. **AST (`src/ast.c` / `src/ast.h`)**: representação estruturada do programa.
-4. **Semântica (`src/semantics.c`)**: checa tipos e variáveis declaradas.
-5. **Codegen (`src/codegen.c`)**: emite MIPS.
-6. **Main (`src/main.c`)**: orquestra tudo.
-
-### Bloco C — Decisões técnicas explicadas de forma defensável (4 min)
-
-#### 1. “Por que usar AST?”
-Resposta curta:
-- Porque o parser só valida formato; a AST guarda a **estrutura lógica** para as fases seguintes.
-
-Resposta técnica:
-- A AST elimina detalhes sintáticos supérfluos e deixa nós úteis (atribuição, operação binária, if, while, bloco).
-- Sem AST, semântica e geração de código ficariam acopladas ao parser e muito mais difíceis de manter.
-
-#### 2. “Por que lista encadeada para comandos/declarações?”
-- A gramática naturalmente produz sequências de tamanho variável.
-- Lista encadeada simplifica montagem incremental durante parsing.
-- Evita realocações frequentes de vetor dinâmico.
-
-#### 3. “Por que pilha de escopos na semântica?”
-- Blocos `{}` entram e saem: comportamento de pilha.
-- Permite shadowing correto (variável interna pode esconder externa).
-- Implementação simples e coerente com regras de escopo léxico.
-
-#### 4. “É árvore binária ou ternária?”
-- **Expressões binárias** (`+`, `-`, `*`, `/`, comparações, lógicos) usam dois filhos: esquerda e direita.
-- **If** pode carregar 2 ou 3 partes lógicas: condição, ramo then e opcional else.
-- Portanto, o projeto usa uma AST heterogênea: cada tipo de nó tem sua própria “aridade”.
-
-### Bloco D — Demonstração ao vivo (3 a 5 min)
-1. Mostre um programa de entrada curto.
-2. Compile e gere `.asm`.
-3. Aponte no output onde aparecem:
-   - operação aritmética,
-   - desvio condicional,
-   - laço.
-4. Mostre 1 erro semântico proposital (ex.: variável não declarada).
+> Objetivo deste documento: te levar do **zero em compiladores** até o ponto de conseguir explicar com segurança cada etapa do seu projeto, justificar decisões e responder perguntas técnicas do professor.
 
 ---
 
-## 3) Mapa mental para estudar de verdade
+## PARTE 1 — Fundamentos de Compiladores (do zero)
 
-## Etapa 1 — Entender o fluxo de execução (base)
-Abra `src/main.c` e memorize:
-1. Abre arquivo.
-2. Chama `yyparse()`.
-3. Se parser ok, chama `check_semantics()`.
-4. Se semântica ok, chama `generate_code()`.
+## 1. O que é um compilador?
+Um compilador é um programa que transforma código-fonte escrito em uma linguagem A (alto nível) para uma linguagem B (baixo nível), normalmente assembly ou código de máquina.
 
-Meta: você precisa conseguir desenhar esse fluxo sem olhar código.
+No seu caso:
+- **Entrada**: linguagem G-V1 (`.g`)
+- **Saída**: código MIPS (`.asm`)
 
-## Etapa 2 — Entender os nós da AST
-Abra `src/ast.h` e `src/ast.c` e identifique:
-- tipos de expressão (`EX_INT`, `EX_VAR`, `EX_BINARY`, etc.),
-- tipos de comando (`ST_IF`, `ST_WHILE`, `ST_BLOCK`, etc.).
+## 2. As 4 fases clássicas que seu projeto implementa
 
-Meta: dado um trecho fonte, dizer quais nós serão criados.
+1. **Análise Léxica** (Lexer):
+   - Lê caracteres.
+   - Agrupa em tokens (identificador, número, palavra-chave, símbolo).
+2. **Análise Sintática** (Parser):
+   - Verifica se os tokens obedecem à gramática.
+   - Constrói a AST (árvore sintática abstrata).
+3. **Análise Semântica**:
+   - Verifica regras de significado (tipo, escopo, uso de variável).
+4. **Geração de Código**:
+   - Traduz AST válida para MIPS.
 
-## Etapa 3 — Entender semântica (onde professor mais pressiona)
-Em `src/semantics.c`, foque em:
-1. `push_scope` / `pop_scope`;
-2. `lookup_scope` e `lookup_all`;
-3. `analyze_expr`;
-4. `analyze_stmt`.
+## 3. Diferença essencial (pergunta clássica)
+- Léxico valida “palavras” (tokenização).
+- Sintático valida “frases” (estrutura gramatical).
+- Semântico valida “sentido” (regras de tipo/escopo).
 
-Meta: explicar 3 erros detectados automaticamente:
-- variável não declarada,
-- redeclaração no mesmo escopo,
-- operação com tipos incompatíveis.
-
-## Etapa 4 — Entender geração de código
-Em `src/codegen.c`, encontre:
-- geração para expressão binária,
-- geração para if,
-- geração para while,
-- syscalls de entrada/saída.
-
-Meta: explicar como um `while` vira rótulos + branch + jump.
+Exemplo:
+- `int x; x = 'a' + 2;`
+  - Léxico: ok
+  - Sintático: ok
+  - Semântico: pode falhar se regra não permitir operação mista
 
 ---
 
-## 4) Perguntas difíceis e respostas prontas
+## PARTE 2 — Arquitetura real do seu projeto
 
-### “Como você garante escopo correto?”
-“Cada bloco cria um escopo novo com push e ao sair faz pop. A busca por variáveis começa no escopo atual e sobe para os anteriores; isso implementa shadowing naturalmente.”
+## 4. Mapa de arquivos (o que cada arquivo faz)
 
-### “Como verifica tipos?”
-“`analyze_expr` faz checagem recursiva. Primeiro infere filhos, depois valida operador. Se tipos não batem, aborta com erro semântico e linha.”
+- `src/lexer.l`: regras do Flex (tokens da linguagem).
+- `src/parser.y`: gramática Bison e ações semânticas que montam AST.
+- `src/ast.h` e `src/ast.c`: definição e construção dos nós da AST.
+- `src/semantics.h` e `src/semantics.c`: checagem semântica (tipos, escopos, símbolos).
+- `src/codegen.h` e `src/codegen.c`: geração do assembly MIPS.
+- `src/main.c`: orquestra pipeline completo.
 
-### “Por que abortar no primeiro erro?”
-“Decisão de projeto para simplificar o compilador didático: evita cascata de erros derivados e facilita depuração da fase atual.”
+## 5. Fluxo de execução real (o que acontece quando roda)
 
-### “Quais limitações atuais?”
-- Tipos básicos restritos (int/car).
-- Estratégia simples de erros (fail-fast).
-- Sem otimizações avançadas.
+1. `main` abre arquivo de entrada e aponta `yyin` para o lexer.
+2. `yyparse()` chama lexer + parser e monta `root_program`.
+3. Se parsing passou, `check_semantics(&root_program)` valida significado.
+4. Se semântica passou, `generate_code(&root_program, out)` gera MIPS.
 
----
-
-## 5) Plano de treino (2 dias)
-
-### Dia 1
-1. Ler `main.c` + `semantics.c`.
-2. Montar fala de 5 min sem slides.
-3. Executar 3 casos: válido, tipo inválido, identificador não declarado.
-
-### Dia 2
-1. Ler `codegen.c` com foco em if/while.
-2. Fazer apresentação simulada de 10 min.
-3. Gravar áudio e revisar pontos de hesitação.
+Mensagem para banca:
+> “Meu compilador é **fail-fast por fase**: erro sintático para sintaxe; erro semântico para significado; só gera código quando as fases anteriores estão corretas.”
 
 ---
 
-## 6) Script de fala inicial (pode decorar)
-“Professor, meu compilador segue o pipeline clássico: lexer, parser, AST, semântica e geração de código MIPS. O parser garante forma sintática; a semântica garante regras de tipo e escopo com pilha de símbolos; e só depois disso o backend gera assembly. A principal decisão de arquitetura foi separar essas fases para manter corretude e facilitar manutenção.”
+## PARTE 3 — AST explicada como se você fosse ensinar
+
+## 6. O que é AST?
+AST (Abstract Syntax Tree) é uma árvore que representa a estrutura lógica do programa, sem detalhes supérfluos de pontuação.
+
+Exemplo simples:
+- Fonte: `a = 2 + 3`
+- AST:
+  - ASSIGN(name="a")
+    - BINARY(ADD)
+      - INT(2)
+      - INT(3)
+
+## 7. Por que AST foi uma boa escolha?
+1. Separa parsing das fases seguintes.
+2. Facilita checagem semântica recursiva.
+3. Facilita gerar código por travessia da árvore.
+4. Escala para novas features (novos tipos de nós).
+
+## 8. “É árvore binária, ternária ou mista?”
+Resposta correta para seu projeto:
+- É **mista/heterogênea**.
+- Nós de expressão binária têm 2 filhos (`left`, `right`).
+- Nó `if` tem até 3 componentes lógicas (`cond`, `then`, `else`).
+- Alguns nós têm 1 filho (unário), outros podem ter 0 (literal).
+
+## 9. Como a AST é montada no projeto
+No `parser.y`, cada regra gramatical chama funções como:
+- `new_expr_binary(...)`
+- `new_stmt_if(...)`
+- `new_stmt_while(...)`
+- `new_decl(...)`
+
+Essas funções estão em `ast.c` e encapsulam a criação correta dos nós.
 
 ---
 
-## 7) Checklist final antes de apresentar
-- [ ] Consigo explicar o pipeline sem ler.
-- [ ] Sei justificar AST + pilha de escopos.
-- [ ] Sei mostrar 1 erro semântico e explicar por que ocorreu.
-- [ ] Sei apontar no MIPS onde está if/while.
-- [ ] Tenho resposta para limitações e próximos passos.
+## PARTE 4 — Semântica (a parte que mais cai em pergunta)
+
+## 10. O que a semântica precisa garantir
+
+1. Variável foi declarada antes de usar.
+2. Não redeclarar mesmo nome no mesmo escopo.
+3. Operações respeitam tipos.
+4. Condições de `if`/`while` têm tipo válido.
+
+## 11. Tabela de símbolos
+A tabela de símbolos guarda dados de identificadores:
+- nome
+- tipo
+- metadados úteis ao backend (offset/size)
+
+No seu código, isso é o `struct Sym`.
+
+## 12. Pilha de escopos
+Cada bloco `{ ... }` abre um escopo novo:
+- entra no bloco: `push_scope`
+- sai do bloco: `pop_scope`
+
+Busca de variável:
+- `lookup_scope`: só escopo atual.
+- `lookup_all`: atual e ancestrais (de dentro para fora).
+
+Isso implementa **shadowing** naturalmente.
+
+## 13. Inferência/checagem de tipos em expressões
+`analyze_expr` percorre árvore recursivamente (pós-ordem):
+1. resolve tipo dos filhos
+2. valida operador
+3. define tipo do nó pai
+
+Exemplo:
+- `2 + 3` -> INT
+- `x < y` -> INT lógico (resultado de comparação)
+
+## 14. Estratégia de erro
+Seu projeto usa erro fatal (`semantic_error` + `exit`) no primeiro erro.
+Vantagem didática:
+- simplifica controle de estado;
+- evita enxurrada de erros em cascata.
+
+Desvantagem (pode falar como limitação):
+- não lista múltiplos erros em uma única compilação.
+
+---
+
+## PARTE 5 — Geração de código MIPS (visão de banca)
+
+## 15. Ideia geral do backend
+Após AST validada:
+- aloca dados/strings quando necessário;
+- gera instruções para expressões;
+- gera desvios para `if` e loops;
+- emite syscalls para I/O.
+
+## 16. Tradução mental de estruturas
+
+### Atribuição
+- calcula expressão da direita
+- grava no endereço da variável da esquerda
+
+### If
+- avalia condição
+- branch para rótulo do `else`/fim quando falsa
+- bloco `then`
+- jump para fim (se tiver else)
+- bloco `else`
+
+### While
+- rótulo de teste
+- avalia condição
+- sai do loop se falsa
+- executa corpo
+- jump para rótulo de teste
+
+---
+
+## PARTE 6 — Perguntas difíceis (com resposta pronta)
+
+## 17. “Por que linked list em vez de vetor?”
+“Porque comandos e declarações são construídos incrementalmente durante parsing; lista encadeada simplifica append por encadeamento sem realocação frequente.”
+
+## 18. “Por que fail-fast?”
+“Decisão de escopo didático: garante consistência interna e reduz complexidade do compilador. Em versão industrial, eu acrescentaria recuperação de erro para continuar análise.”
+
+## 19. “Como provar que escopo funciona?”
+“Porque `lookup_scope` bloqueia redeclaração local e `lookup_all` busca de dentro para fora, implementando shadowing. Além disso, cada bloco empilha/desempilha seu contexto.”
+
+## 20. “Como provar que tipos funcionam?”
+“`analyze_expr` valida por tipo de nó. Operações aritméticas exigem tipos compatíveis; comparações exigem compatibilidade entre operandos; `if/while` exigem condição inteira/lógica do modelo da linguagem.”
+
+## 21. “Se eu pedir nova feature, onde mexe?”
+- novo token: `lexer.l`
+- nova regra sintática: `parser.y`
+- novo nó AST: `ast.h`/`ast.c`
+- nova regra semântica: `semantics.c`
+- nova emissão de código: `codegen.c`
+
+---
+
+## PARTE 7 — Checklist completo de domínio
+
+## 22. Checklist técnico
+- [ ] Sei explicar token, gramática, AST, escopo e tipo.
+- [ ] Sei desenhar pipeline do `main` sem consultar código.
+- [ ] Sei explicar diferença entre erro léxico/sintático/semântico.
+- [ ] Sei explicar shadowing com exemplo.
+- [ ] Sei explicar como if/while viram branch/jump.
+- [ ] Sei descrever ao menos 3 limitações reais do projeto.
+
+## 23. Checklist de demo ao vivo
+- [ ] Caso válido gerando `.asm`.
+- [ ] Caso com variável não declarada.
+- [ ] Caso com tipos incompatíveis.
+- [ ] Caso com erro sintático simples.
+
+---
+
+## PARTE 8 — Mini glossário (rápido para decorar)
+
+- **Token**: unidade léxica (ex: `ID`, `NUM`, `IF`).
+- **Gramática**: regras formais da linguagem.
+- **AST**: árvore lógica do programa.
+- **Escopo**: região onde um identificador é visível.
+- **Shadowing**: variável interna com mesmo nome da externa.
+- **Type checking**: validação de compatibilidade de tipos.
+- **Backend**: fase que gera código alvo (MIPS).
+
+---
+
+## PARTE 9 — Roteiro de fala de 12 minutos (pronto)
+
+1. **(1 min)** “Vou mostrar um compilador educacional da linguagem G-V1 para MIPS.”
+2. **(2 min)** “Pipeline: léxico, sintático, AST, semântico, backend.”
+3. **(2 min)** “AST: por que existe, como representa expressões e controle.”
+4. **(3 min)** “Semântica: tabela de símbolos, pilha de escopos, checagem de tipos.”
+5. **(2 min)** “Codegen: como if/while e expressões viram instruções.”
+6. **(2 min)** “Limitações + próximos passos.”
+
+Frase final forte:
+> “A arquitetura separada por fases me permite garantir corretude incremental: cada fase valida uma dimensão do problema antes da próxima.”
+
+---
+
+## PARTE 10 — Próximos passos (se professor pedir evolução)
+
+1. Recuperação de erro semântico para relatar múltiplos erros.
+2. Otimizações básicas (constant folding).
+3. Mais tipos e coerções explícitas.
+4. Funções/procedimentos e parâmetros.
+5. Testes automatizados com casos positivos e negativos.
+
