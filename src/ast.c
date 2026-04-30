@@ -91,10 +91,8 @@ Expr *new_expr_assign(char *name, Expr *value, int line) {
 }
 
 /*
- * O que o método faz: Anexa dois nós operandos (left, right) a uma operação binária.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Implementação hierárquica das precedências aritméticas do parser Bison.
- * Dica para a Banca: "Cria a ramificação da árvore. O gerador de código usará isso para saber o que desempilhar depois de avaliar os dois lados."
+ * Cria nó de expressão binária (sempre 2 filhos: left e right).
+ * Útil para explicar "aridade" da AST: +, -, *, / e comparações são binárias.
  */
 Expr *new_expr_binary(OpKind op, Expr *left, Expr *right, int line) {
     Expr *e = alloc_expr(EX_BINARY, line);
@@ -218,10 +216,11 @@ Stmt *new_stmt_newline(int line) {
 }
 
 /*
- * O que o método faz: Aloca a bifurcação de controle de fluxo condicional com ou sem ELSE.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Gerador de Código MIPS.
- * Regra da G-V1: Estruturas de decisão lógicas ('se').
- * Dica para a Banca: "Unimos IF e IF/ELSE em um mesmo tipo de nó. Se o then_branch existe, a branch no MIPS salta para ele, e se o else_branch for NULL, ele vira um jump neutro."
+ * Cria nó de if com estrutura:
+ * - cond (expressão)
+ * - then_branch (obrigatório)
+ * - else_branch (opcional)
+ * Na apresentação: este é o melhor exemplo de nó com 2 ou 3 componentes lógicas.
  */
 Stmt *new_stmt_if(Expr *cond, Stmt *then_branch, Stmt *else_branch, int line) {
     Stmt *s = alloc_stmt(ST_IF, line);

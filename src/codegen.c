@@ -4,6 +4,14 @@
 #include "codegen.h"
 
 /*
+ * LEITURA GUIADA DO CODEGEN (para iniciantes):
+ * 1) Primeiro coletamos strings da AST para emitir a seção .data.
+ * 2) Depois emitimos a seção .text percorrendo comandos/expressões.
+ * 3) Variáveis locais viram offsets relativos ao frame pointer.
+ * 4) Cada bloco abre/fecha escopo para alocação e desalocação de pilha.
+ */
+
+/*
  * O que a estrutura faz: Mapeia uma variável no contexto do gerador de código.
  * Papel no Pipeline: Gerador de Código MIPS (Manutenção de Memória Local).
  * Regra da G-V1: Cálculo de offsets no MIPS baseados no frame pointer ($fp).

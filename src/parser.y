@@ -13,6 +13,20 @@ void yyerror(const char *s);
 Program root_program;
 
 /*
+ * GUIA RÁPIDO (para quem nunca viu Bison):
+ * - O parser recebe tokens do lexer (função yylex()).
+ * - Cada "regra" abaixo diz como reconhecer partes da linguagem.
+ * - Quando uma regra casa, o bloco { ... } executa e geralmente cria nós da AST.
+ * - $1, $2, $3... = valores dos símbolos da regra (lado direito).
+ * - $$ = valor produzido pela regra (lado esquerdo).
+ *
+ * Exemplo mental:
+ *   Expr: Expr TOK_PLUS Expr { $$ = new_expr_binary(OP_ADD, $1, $3, yylineno); }
+ * Significa:
+ *   "se reconhecer expr + expr, crie um nó AST de soma com filho esquerdo e direito".
+ */
+
+/*
  * O que a estrutura faz: Nó auxiliar para acumular nomes de variáveis declaradas numa mesma linha.
  * Papel no Pipeline: Sintático (Apoio).
  * Regra da G-V1: Declarações múltiplas (ex: a, b: int;).
@@ -67,10 +81,9 @@ typedef struct IdentNode {
 %%
 
 /*
- * O que o método faz: Ponto de partida gramatical.
- * Papel no Pipeline: Sintático.
- * Regra da G-V1: Define a estrutura principal do programa.
- * Dica para a Banca: "Axioma principal da nossa LALR; quando esta regra é resolvida, a árvore completa está ancorada no root_program."
+ * Regra inicial da linguagem.
+ * Lê a palavra-chave principal e um bloco completo.
+ * Ao reduzir esta regra, a AST final fica guardada em root_program.
  */
 Programa:
     TOK_PRINCIPAL Block {
@@ -79,10 +92,11 @@ Programa:
 ;
 
 /*
- * O que o método faz: Avalia as chaves de bloco, opcionalmente com variáveis.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: O controle de escopo deve respeitar variáveis locais; cria um Block.
- * Dica para a Banca: "Casamos aqui os escopos. A diferença entre block com e sem declarações de var é resolvida diretamente aqui para a AST."
+ * Bloco da linguagem.
+ * Suporta duas formas:
+ * 1) bloco com declarações + bloco de comandos
+ * 2) bloco só com comandos
+ * Cada forma produz um nó Block na AST.
  */
 Block:
     TOK_LBRACE VarDeclList TOK_RBRACE TOK_LBRACE ComandoList TOK_RBRACE {
@@ -95,10 +109,8 @@ Block:
 ;
 
 /*
- * O que o método faz: Reduz múltiplas linhas de declaração de variáveis.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Suporte a listas encadeadas de Decls.
- * Dica para a Banca: "Concatena O(n) os blocos declarativos pra popular o preâmbulo do scope."
+ * Lista de declarações de variáveis.
+ * Faz encadeamento de Decl para representar quantidade arbitrária de linhas.
  */
 VarDeclList:
     VarDecl { $$ = $1; }
@@ -111,10 +123,11 @@ VarDeclList:
 ;
 
 /*
- * O que o método faz: Amarra a lista de nomes ao seu Tipo especificado no fim da linha.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Define a tipagem real.
- * Dica para a Banca: "Consome a IdentNode provisória e despeja pra valer os ponteiros do new_decl."
+ * Declaração do tipo: a, b, c : int;
+ * Passos:
+ * 1) IdentList guarda os nomes temporariamente.
+ * 2) Quando o tipo chega (Tipo), cria um Decl para cada nome.
+ * 3) Resultado final: lista encadeada de Decl pronta para a AST.
  */
 VarDecl:
     IdentList TOK_COLON Tipo TOK_SEMICOLON {
@@ -133,10 +146,8 @@ VarDecl:
 ;
 
 /*
- * O que o método faz: Captura os ids brutos e junta numa lista encadeada leve (IdentNode).
- * Papel no Pipeline: Sintático.
- * Regra da G-V1: Permite declarações aglomeradas `x, y, z : int;`.
- * Dica para a Banca: "Isola a coleta de tokens de Ident do binding do tipo (que só chega no final da linha)."
+ * Coleta identificadores separados por vírgula.
+ * Esta estrutura é temporária: existe só até VarDecl converter em Decl.
  */
 IdentList:
     TOK_IDENT {
@@ -160,6 +171,11 @@ Tipo:
   | TOK_CAR { $$ = TYPE_CAR; }
 ;
 
+/*
+ * Lista de comandos.
+ * Regra recursiva para aceitar zero ou mais comandos.
+ * Caso vazio retorna NULL (bloco sem comandos).
+ */
 ComandoList:
     /* empty */ { $$ = NULL; }
   | Comando ComandoList {
@@ -173,10 +189,13 @@ ComandoList:
 ;
 
 /*
- * O que o método faz: Deriva as statements imperativas e monta nós da árvore.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Abordar loop 'enquanto', if 'se', input e output.
- * Dica para a Banca: "Gramática LALR lida de forma limpa com shift/reduce em `Comando`. Associatividade aqui mata logo os statements pesados."
+ * Regras de comando da linguagem.
+ * Cada alternativa gera um tipo de Stmt:
+ * - leitura/escrita
+ * - if / if-else
+ * - while
+ * - bloco aninhado
+ * - expressão como comando (ex.: atribuição;)
  */
 Comando:
     TOK_SEMICOLON { $$ = new_stmt_empty(yylineno); }
@@ -202,10 +221,12 @@ Comando:
 ;
 
 /*
- * O que o método faz: Avalia e constrói a árvore de matemática e lógica respeitando precedência (definida via %left e %right).
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: A precedência deve garantir os agrupamentos sem inflar as regras (LALR).
- * Dica para a Banca: "Uso pesado de %prec para matar ambiguidades lógicas, como o famigerado minus unário brigando com a subtração binária."
+ * Expressões da linguagem.
+ * Precedência vem das diretivas %left/%right no topo do arquivo.
+ * Pontos importantes para explicar:
+ * - UMINUS resolve diferença entre "-x" e "a - b".
+ * - Parênteses forçam agrupamento.
+ * - Cada operação vira nó AST próprio (unário ou binário).
  */
 Expr:
     TOK_IDENT { $$ = new_expr_var($1, yylineno); }
@@ -232,10 +253,9 @@ Expr:
 %%
 
 /*
- * O que o método faz: Dispara quando a tabela LALR do Bison detecta um token inesperado.
- * Papel no Pipeline: Sintático (Validador).
- * Regra da G-V1: Padronização da saída de erro na forma exigida.
- * Dica para a Banca: "O yyerror encerra o compilador imediatamente usando o yylineno para apontar ao programador onde seu castelo de cartas ruiu."
+ * Tratamento de erro sintático.
+ * Bison chama yyerror quando a sequência de tokens não casa com a gramática.
+ * Aqui o compilador emite erro padronizado com linha e encerra.
  */
 void yyerror(const char *s) {
     extern int yylineno;

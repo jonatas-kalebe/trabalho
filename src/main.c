@@ -9,10 +9,13 @@ extern Program root_program;
 extern FILE *yyin;
 
 /*
- * O que o método faz: Orquestra o fluxo de execução passando por léxico/sintático, semântico e geração de código.
- * Papel no Pipeline: Controlador Principal (Lexer->Parser->AST->Semântico->MIPS).
- * Regra da G-V1: Invocação unificada do compilador (LALR gerado pelo Bison via yyparse).
- * Dica para a Banca: "A main() atua como maestro. Se o yyparse falha, a AST nem nasce; se a semântica morre, o MIPS nunca é sujado."
+ * Fluxo da apresentação:
+ * 1) yyparse() valida sintaxe e constrói a AST global (root_program).
+ * 2) check_semantics() valida tipos/escopo sobre a AST.
+ * 3) generate_code() só executa se as duas fases anteriores passaram.
+ *
+ * Mensagem-chave para banca:
+ * "Falha cedo e para cedo: sem AST válida não há semântica; sem semântica válida não há MIPS."
  */
 int main(int argc, char** argv) {
     if (argc < 2) {
