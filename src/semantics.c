@@ -4,6 +4,12 @@
 #include "semantics.h"
 #include "ast.h"
 
+/*
+ * O que a estrutura faz: Define um nó (variável) na Tabela de Símbolos.
+ * Papel no Pipeline: Semântico (Manutenção de Estado).
+ * Regra da G-V1: Retenção do tipo (int/car) e do deslocamento na pilha (offset).
+ * Dica para a Banca: "Armazenamos o size e offset aqui para que a tabela de símbolos já deixe a cama pronta para os cálculos de fp e sp na geração de MIPS."
+ */
 typedef struct Sym {
     char *name;
     Type type;
@@ -12,24 +18,54 @@ typedef struct Sym {
     struct Sym *next;
 } Sym;
 
+/*
+ * O que a estrutura faz: Representa um nível de escopo, empilhando variáveis visíveis no bloco atual.
+ * Papel no Pipeline: Semântico (Contexto).
+ * Regra da G-V1: O controle de escopo deve respeitar variáveis locais sobrepondo globais ao bloco (shadowing).
+ * Dica para a Banca: "Como usamos uma pilha encadeada de scopes, o shadowing acontece de graça: a busca para no primeiro nível em que achar a variável."
+ */
 typedef struct Scope {
     Sym *symbols;
     struct Scope *prev;
 } Scope;
 
+/*
+ * O que a estrutura faz: Mantém o contexto global semântico durante a travessia da AST.
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: Isolamento de estado na passagem de validadores.
+ * Dica para a Banca: "O Contexto Semântico carrega o ponteiro pro escopo no topo, facilitando o tracking sem entupir as assinaturas das funções."
+ */
 typedef struct {
     Scope *top;
 } SemanticCtx;
 
+/*
+ * O que o método faz: Informa o tamanho em bytes de cada tipo primitivo.
+ * Papel no Pipeline: Semântico -> Gerador de Código MIPS.
+ * Regra da G-V1: Gerenciamento de memória na pilha MIPS.
+ * Dica para a Banca: "Alocamos 4 bytes pro INT e 1 byte pro CAR, sendo fiéis à arquitetura base do MIPS32."
+ */
 static int type_size(Type t) {
     return (t == TYPE_INT) ? 4 : 1;
 }
 
+/*
+ * O que o método faz: Relata falhas de tipo ou semântica e aborta o compilador.
+ * Papel no Pipeline: Semântico (Validação).
+ * Regra da G-V1: Controle de regras estritas de tipos.
+ * Dica para a Banca: "Impedimos que o compilador siga se o usuário misturar banana com maçã na hora de programar."
+ */
 static void semantic_error(int line, const char *msg) {
     printf("ERRO: %s %d\n", msg, line);
     exit(1);
 }
 
+/*
+ * O que o método faz: Empilha um novo nível de escopo na estrutura do contexto semântico.
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: Controle de blocos ({ }).
+ * Dica para a Banca: "Sempre que entramos em um curly brace, chamamos esse método pra criar o ambiente isolado de novas variáveis."
+ */
 static Scope *push_scope(Scope *top) {
     Scope *s = (Scope *)calloc(1, sizeof(Scope));
     if (!s) die_alloc();
@@ -37,6 +73,12 @@ static Scope *push_scope(Scope *top) {
     return s;
 }
 
+/*
+ * O que o método faz: Remove e libera a memória do escopo atual ao sair de um bloco.
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: Fechamento de controle de escopo e destruição de variáveis temporárias do bloco.
+ * Dica para a Banca: "Limpamos a memória da tabela local para não vazar memória no próprio compilador e forçamos o abandono das variáveis daquele bloco."
+ */
 static Scope *pop_scope(Scope *top) {
     Scope *p = top->prev;
     while (top->symbols) {
@@ -48,6 +90,12 @@ static Scope *pop_scope(Scope *top) {
     return p;
 }
 
+/*
+ * O que o método faz: Procura uma variável especificamente no bloco ATUAL.
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: Detecção de duplo-declaração de variável no mesmo nível.
+ * Dica para a Banca: "Isso garante que um bloco não declare `int x; car x;`, mas permite que declare `x` caso o `x` de cima esteja em outro scope."
+ */
 static Sym *lookup_scope(Scope *s, const char *name) {
     for (Sym *it = s ? s->symbols : NULL; it; it = it->next) {
         if (strcmp(it->name, name) == 0) return it;
@@ -55,6 +103,12 @@ static Sym *lookup_scope(Scope *s, const char *name) {
     return NULL;
 }
 
+/*
+ * O que o método faz: Procura uma variável navegando de dentro para fora na pilha de escopos.
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: O controle de escopo deve respeitar variáveis locais sobrepondo globais.
+ * Dica para a Banca: "Esta é a magia que realiza o shadowing. Encontrou no nível mais baixo? Ele para e retorna, mascarando eventuais variáveis de mesmo nome fora dali."
+ */
 static Sym *lookup_all(Scope *top, const char *name) {
     for (Scope *s = top; s; s = s->prev) {
         Sym *f = lookup_scope(s, name);
@@ -63,6 +117,12 @@ static Sym *lookup_all(Scope *top, const char *name) {
     return NULL;
 }
 
+/*
+ * O que o método faz: Insere uma nova variável no escopo topo da pilha.
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: Atualização contínua da tabela de símbolos pelas declarações.
+ * Dica para a Banca: "A checagem preventiva com lookup_scope já garante que nenhuma variável nasça sobreposta indevidamente no seu próprio nível."
+ */
 static void add_symbol(Scope *scope, char *name, Type type, int line) {
     if (lookup_scope(scope, name)) semantic_error(line, "IDENTIFICADOR JA DECLARADO");
     Sym *s = (Sym *)calloc(1, sizeof(Sym));
@@ -77,6 +137,12 @@ static void add_symbol(Scope *scope, char *name, Type type, int line) {
 static Type analyze_expr(SemanticCtx *ctx, Expr *e);
 static void analyze_stmt(SemanticCtx *ctx, Stmt *s);
 
+/*
+ * O que o método faz: Analisa um bloco de comandos, pushando escopo novo e alimentando símbolos.
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: Ancorar blocos da AST ao ciclo de vida da tabela de símbolos.
+ * Dica para a Banca: "Processamos primeiro as declarações (para populacionar as variáveis locais) e depois mergulhamos nos comandos que irão usá-las."
+ */
 static void analyze_block(SemanticCtx *ctx, Block *b) {
     if (!b) return;
     ctx->top = push_scope(ctx->top);
@@ -92,6 +158,12 @@ static void analyze_block(SemanticCtx *ctx, Block *b) {
     ctx->top = pop_scope(ctx->top);
 }
 
+/*
+ * O que o método faz: Varre expressões recursivamente verificando inferência e consistência de tipo.
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: Checagem de tipos int e car, impedindo operações ilegais e incompatíveis.
+ * Dica para a Banca: "Aplicamos type-inference post-order. Primeiro os filhos resolvem seus tipos, o nó pai checa a compatibilidade e assina a si próprio com o tipo resultante."
+ */
 static Type analyze_expr(SemanticCtx *ctx, Expr *e) {
     if (!e) return TYPE_INT;
     switch (e->kind) {
@@ -159,6 +231,12 @@ static Type analyze_expr(SemanticCtx *ctx, Expr *e) {
     return TYPE_INT;
 }
 
+/*
+ * O que o método faz: Analisa e valida os comandos um a um (condicionais, repetição, primitivas).
+ * Papel no Pipeline: Semântico.
+ * Regra da G-V1: Garantir que lógicas de condicional ("se" e "enquanto") tenham condição booleana (resolvida por INT no G-V1).
+ * Dica para a Banca: "Delegações eficientes que forçam restrições pesadas na árvore; se um `while` tem condição em CAR, nós paramos o processo."
+ */
 static void analyze_stmt(SemanticCtx *ctx, Stmt *s) {
     if (!s) return;
     switch (s->kind) {
@@ -197,6 +275,12 @@ static void analyze_stmt(SemanticCtx *ctx, Stmt *s) {
     }
 }
 
+/*
+ * O que o método faz: Engatilha todo o fluxo de Type Check e Binding de símbolos começando do nó raiz.
+ * Papel no Pipeline: Semântico (Orquestração Inicial).
+ * Regra da G-V1: Inicia o processo com um top-scope para o Bloco do Principal.
+ * Dica para a Banca: "Esta interface conecta o mundo exterior do main() na nossa infraestrutura profunda de validação, mascarando a complexidade do contexto."
+ */
 void check_semantics(Program *prog) {
     SemanticCtx sem;
     sem.top = NULL;

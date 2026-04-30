@@ -3,6 +3,12 @@
 #include <string.h>
 #include "codegen.h"
 
+/*
+ * O que a estrutura faz: Mapeia uma variável no contexto do gerador de código.
+ * Papel no Pipeline: Gerador de Código MIPS (Manutenção de Memória Local).
+ * Regra da G-V1: Cálculo de offsets no MIPS baseados no frame pointer ($fp).
+ * Dica para a Banca: "No gerador, a tabela de símbolos armazena o offset real (negativo relativo ao $fp) da variável recém-alocada na pilha do MIPS."
+ */
 typedef struct CGSym {
     char *name;
     Type type;
@@ -11,18 +17,36 @@ typedef struct CGSym {
     struct CGSym *next;
 } CGSym;
 
+/*
+ * O que a estrutura faz: Representa uma literal de string (para comandos de escreva).
+ * Papel no Pipeline: Gerador de Código MIPS (Seção .data).
+ * Regra da G-V1: Suporte a print de literais.
+ * Dica para a Banca: "Coletamos todas as strings para despejar na seção .data com labels únicos antes de emitir a lógica na .text."
+ */
 typedef struct CGString {
     char *text;
     char *label;
     struct CGString *next;
 } CGString;
 
+/*
+ * O que a estrutura faz: Representa o ambiente léxico momentâneo para alocação no MIPS.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: O controle de escopo deve respeitar variáveis locais sobrepondo globais ao bloco (shadowing).
+ * Dica para a Banca: "Mantemos um stack pointer virtual ($sp) acompanhando o escopo para liberar a memória (addiu $sp, alloc_size) quando o bloco acaba."
+ */
 typedef struct CGScope {
     CGSym *symbols;
     int alloc_size;
     struct CGScope *prev;
 } CGScope;
 
+/*
+ * O que a estrutura faz: Carrega o estado global (labels, contadores, out file) do assembly.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Contexto de arquitetura para a fase de emissão.
+ * Dica para a Banca: "Aqui guardamos a profundidade (`depth`) atual para calcular offsets precisos para novas declarações durante o nesting de blocos."
+ */
 typedef struct {
     FILE *out;
     CGString *strings;
@@ -32,10 +56,22 @@ typedef struct {
     int depth;
 } CodegenCtx;
 
+/*
+ * O que o método faz: Retorna 4 para INT e 1 para CAR.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Suporte aos tamanhos exatos das variáveis na pilha ($sp).
+ * Dica para a Banca: "Fundamental para o cálculo de offset denso (sem waste excessivo) no stack frame."
+ */
 static int cg_type_size(Type t) {
     return (t == TYPE_INT) ? 4 : 1;
 }
 
+/*
+ * O que o método faz: Busca as meta-informações de MIPS de uma variável já validada.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Resolução de endereços locais por shadowing.
+ * Dica para a Banca: "Garante que o LW ou SW vá bater no endereço de offset certinho da variável mais restrita visível no momento."
+ */
 static CGSym *cg_lookup(CodegenCtx *cg, const char *name) {
     for (CGScope *s = cg->top; s; s = s->prev) {
         for (CGSym *it = s->symbols; it; it = it->next) {
@@ -45,12 +81,24 @@ static CGSym *cg_lookup(CodegenCtx *cg, const char *name) {
     return NULL;
 }
 
+/*
+ * O que o método faz: Fornece nomes de labels únicos e sequenciais (ex: while_start_3).
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Implementação de branches para 'se' e 'enquanto'.
+ * Dica para a Banca: "O sufixo com label_count previne colisões de jumps em laços aninhados."
+ */
 static char *new_label(CodegenCtx *cg, const char *prefix) {
     char buf[64];
     snprintf(buf, sizeof(buf), "%s_%d", prefix, cg->label_count++);
     return xstrdup(buf);
 }
 
+/*
+ * O que o método faz: Adiciona escapes corretos para a seção .asciiz do MIPS.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Formatação de strings no assembly.
+ * Dica para a Banca: "Tratamos as quebras de linha pro SPIM não chiar na hora de engolir nossas literais."
+ */
 static char *mips_escape_string(const char *s) {
     size_t n = 0;
     for (const char *p = s; *p; p++) {
@@ -85,6 +133,12 @@ static char *mips_escape_string(const char *s) {
     return out;
 }
 
+/*
+ * O que o método faz: Associa uma label (.data) para uma string, reaproveitando se já existir.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Otimização básica de tabelas de constantes.
+ * Dica para a Banca: "Se o usuário der dois prints com a mesma frase, o intern_string salva memória e emite uma label só."
+ */
 static char *intern_string(CodegenCtx *cg, const char *text) {
     for (CGString *it = cg->strings; it; it = it->next) {
         if (strcmp(it->text, text) == 0) return it->label;
@@ -101,11 +155,23 @@ static char *intern_string(CodegenCtx *cg, const char *text) {
 
 static void collect_strings_stmt(CodegenCtx *cg, Stmt *s);
 
+/*
+ * O que o método faz: Visita a AST previamente procurando literais de string em blocos.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Preparo da seção .data no MIPS.
+ * Dica para a Banca: "Nossa primeira passada rápida apenas caça e registra constantes para termos uma .data direitinha."
+ */
 static void collect_strings_block(CodegenCtx *cg, Block *b) {
     if (!b) return;
     for (Stmt *s = b->commands; s; s = s->next) collect_strings_stmt(cg, s);
 }
 
+/*
+ * O que o método faz: Recurso auxiliar recursivo para achar strings dentro de comandos aninhados.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Varredura de strings na AST.
+ * Dica para a Banca: "Evita que strings trancadas dentro de whiles ou ifs passem batidas na compilação do .data."
+ */
 static void collect_strings_stmt(CodegenCtx *cg, Stmt *s) {
     if (!s) return;
     if (s->kind == ST_WRITE_STR) {
@@ -123,6 +189,12 @@ static void collect_strings_stmt(CodegenCtx *cg, Stmt *s) {
 static void emit_expr(CodegenCtx *cg, Expr *e);
 static void emit_stmt(CodegenCtx *cg, Stmt *s);
 
+/*
+ * O que o método faz: Cria um frame de variáveis locais empurrando o $sp.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Cálculo de offsets no MIPS para variáveis e alocação dinâmica.
+ * Dica para a Banca: "Acumulamos o total de bytes declarados no bloco e fazemos um único 'addiu $sp' para preservar ciclos do processador."
+ */
 static void cg_push_scope(CodegenCtx *cg, Block *b) {
     CGScope *sc = (CGScope *)calloc(1, sizeof(CGScope));
     if (!sc) die_alloc();
@@ -149,6 +221,12 @@ static void cg_push_scope(CodegenCtx *cg, Block *b) {
     }
 }
 
+/*
+ * O que o método faz: Recua o $sp destruindo o escopo na máquina alvo.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Garbage collection de stack frame e shadowing.
+ * Dica para a Banca: "Garante o isolamento popando (addiu positivo) o tamanho exato daquele bloco, reciclando memória para os próximos blocos irmaos."
+ */
 static void cg_pop_scope(CodegenCtx *cg) {
     CGScope *sc = cg->top;
     if (!sc) return;
@@ -165,6 +243,12 @@ static void cg_pop_scope(CodegenCtx *cg) {
     free(sc);
 }
 
+/*
+ * O que o método faz: Emite o bloco de código controlando os pushes e pops ao redor.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Emissão de bloco sequencial.
+ * Dica para a Banca: "A abstração do Block como command array é onde a recursão se apoia com mais força para aninhar infinitamente no MIPS."
+ */
 static void emit_block(CodegenCtx *cg, Block *b) {
     if (!b) return;
     cg_push_scope(cg, b);
@@ -172,6 +256,12 @@ static void emit_block(CodegenCtx *cg, Block *b) {
     cg_pop_scope(cg);
 }
 
+/*
+ * O que o método faz: Traduz expressões aritméticas para comandos MIPS, guardando tudo no topo da pilha temporária para operações de 2 endereços.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: A geração de código é para arquitetura MIPS baseada em pilha ($sp).
+ * Dica para a Banca: "Nós usamos o $v0 como acumulador e armazenamos temporários do left-node no $sp antes de calcular o right-node. Um design clássico e seguro de stack-machine."
+ */
 static void emit_expr(CodegenCtx *cg, Expr *e) {
     if (!e) return;
     switch (e->kind) {
@@ -239,6 +329,12 @@ static void emit_expr(CodegenCtx *cg, Expr *e) {
     }
 }
 
+/*
+ * O que o método faz: Emite a lógica imperativa do MIPS (branches, IO Syscalls).
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Transformar while e if em jumps (beq e j).
+ * Dica para a Banca: "A conversão de lógicas de alto nível para as SPIM syscalls de código 1 (print_int), 11 (print_char) e 5 (read_int) acontece perfeitamente aqui."
+ */
 static void emit_stmt(CodegenCtx *cg, Stmt *s) {
     if (!s) return;
     switch (s->kind) {
@@ -311,6 +407,12 @@ static void emit_stmt(CodegenCtx *cg, Stmt *s) {
     }
 }
 
+/*
+ * O que o método faz: Setup inicial do MIPS (bootstrapping da .data e main) gerindo o fp original.
+ * Papel no Pipeline: Gerador de Código MIPS.
+ * Regra da G-V1: Ponto de entrada do programa e emissão do assembler final.
+ * Dica para a Banca: "Setamos o $fp como um snapshot do $sp logo na entrada do 'main' para termos um frame pointer estável que sustente todos os offsets das variáveis do escopo global."
+ */
 void generate_code(Program *prog, FILE *out) {
     CodegenCtx cg;
     memset(&cg, 0, sizeof(cg));

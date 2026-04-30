@@ -12,7 +12,12 @@ void yyerror(const char *s);
 
 Program root_program;
 
-// We need a structure for IdentList to build declarations
+/*
+ * O que a estrutura faz: Nó auxiliar para acumular nomes de variáveis declaradas numa mesma linha.
+ * Papel no Pipeline: Sintático (Apoio).
+ * Regra da G-V1: Declarações múltiplas (ex: a, b: int;).
+ * Dica para a Banca: "Isso salva a vida da recursão à esquerda no Bison, segurando os IDs em fila até bater no tipo final (int/car) para construir os decls da AST."
+ */
 typedef struct IdentNode {
     char *name;
     struct IdentNode *next;
@@ -61,15 +66,27 @@ typedef struct IdentNode {
 
 %%
 
+/*
+ * O que o método faz: Ponto de partida gramatical.
+ * Papel no Pipeline: Sintático.
+ * Regra da G-V1: Define a estrutura principal do programa.
+ * Dica para a Banca: "Axioma principal da nossa LALR; quando esta regra é resolvida, a árvore completa está ancorada no root_program."
+ */
 Programa:
     TOK_PRINCIPAL Block {
         root_program.block = $2;
     }
 ;
 
+/*
+ * O que o método faz: Avalia as chaves de bloco, opcionalmente com variáveis.
+ * Papel no Pipeline: Sintático -> Árvore (AST).
+ * Regra da G-V1: O controle de escopo deve respeitar variáveis locais; cria um Block.
+ * Dica para a Banca: "Casamos aqui os escopos. A diferença entre block com e sem declarações de var é resolvida diretamente aqui para a AST."
+ */
 Block:
     TOK_LBRACE VarDeclList TOK_RBRACE TOK_LBRACE ComandoList TOK_RBRACE {
-        $$ = new_block($2, $5, @1.first_line); // line number logic needs adaptation if not using locations, we use yylineno for simplicity or just 0
+        $$ = new_block($2, $5, @1.first_line);
         $$->line = yylineno; // approximate
     }
   | TOK_LBRACE ComandoList TOK_RBRACE {
@@ -77,6 +94,12 @@ Block:
   }
 ;
 
+/*
+ * O que o método faz: Reduz múltiplas linhas de declaração de variáveis.
+ * Papel no Pipeline: Sintático -> Árvore (AST).
+ * Regra da G-V1: Suporte a listas encadeadas de Decls.
+ * Dica para a Banca: "Concatena O(n) os blocos declarativos pra popular o preâmbulo do scope."
+ */
 VarDeclList:
     VarDecl { $$ = $1; }
   | VarDeclList VarDecl {
@@ -87,6 +110,12 @@ VarDeclList:
   }
 ;
 
+/*
+ * O que o método faz: Amarra a lista de nomes ao seu Tipo especificado no fim da linha.
+ * Papel no Pipeline: Sintático -> Árvore (AST).
+ * Regra da G-V1: Define a tipagem real.
+ * Dica para a Banca: "Consome a IdentNode provisória e despeja pra valer os ponteiros do new_decl."
+ */
 VarDecl:
     IdentList TOK_COLON Tipo TOK_SEMICOLON {
         Decl *head = NULL, *tail = NULL;
@@ -103,6 +132,12 @@ VarDecl:
     }
 ;
 
+/*
+ * O que o método faz: Captura os ids brutos e junta numa lista encadeada leve (IdentNode).
+ * Papel no Pipeline: Sintático.
+ * Regra da G-V1: Permite declarações aglomeradas `x, y, z : int;`.
+ * Dica para a Banca: "Isola a coleta de tokens de Ident do binding do tipo (que só chega no final da linha)."
+ */
 IdentList:
     TOK_IDENT {
         $$ = (IdentNode*)malloc(sizeof(IdentNode));
@@ -137,6 +172,12 @@ ComandoList:
   }
 ;
 
+/*
+ * O que o método faz: Deriva as statements imperativas e monta nós da árvore.
+ * Papel no Pipeline: Sintático -> Árvore (AST).
+ * Regra da G-V1: Abordar loop 'enquanto', if 'se', input e output.
+ * Dica para a Banca: "Gramática LALR lida de forma limpa com shift/reduce em `Comando`. Associatividade aqui mata logo os statements pesados."
+ */
 Comando:
     TOK_SEMICOLON { $$ = new_stmt_empty(yylineno); }
   | TOK_LEIA TOK_IDENT TOK_SEMICOLON { $$ = new_stmt_read($2, yylineno); }
@@ -160,6 +201,12 @@ Comando:
   }
 ;
 
+/*
+ * O que o método faz: Avalia e constrói a árvore de matemática e lógica respeitando precedência (definida via %left e %right).
+ * Papel no Pipeline: Sintático -> Árvore (AST).
+ * Regra da G-V1: A precedência deve garantir os agrupamentos sem inflar as regras (LALR).
+ * Dica para a Banca: "Uso pesado de %prec para matar ambiguidades lógicas, como o famigerado minus unário brigando com a subtração binária."
+ */
 Expr:
     TOK_IDENT { $$ = new_expr_var($1, yylineno); }
   | TOK_INTCONST { $$ = new_expr_int($1, yylineno); }
@@ -184,6 +231,12 @@ Expr:
 
 %%
 
+/*
+ * O que o método faz: Dispara quando a tabela LALR do Bison detecta um token inesperado.
+ * Papel no Pipeline: Sintático (Validador).
+ * Regra da G-V1: Padronização da saída de erro na forma exigida.
+ * Dica para a Banca: "O yyerror encerra o compilador imediatamente usando o yylineno para apontar ao programador onde seu castelo de cartas ruiu."
+ */
 void yyerror(const char *s) {
     extern int yylineno;
     printf("ERRO: %s %d\n", "SINTATICO", yylineno > 1 ? yylineno - 1 : 1);
