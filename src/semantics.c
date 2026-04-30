@@ -50,10 +50,8 @@ static int type_size(Type t) {
 }
 
 /*
- * O que o método faz: Relata falhas de tipo ou semântica e aborta o compilador.
- * Papel no Pipeline: Semântico (Validação).
- * Regra da G-V1: Controle de regras estritas de tipos.
- * Dica para a Banca: "Impedimos que o compilador siga se o usuário misturar banana com maçã na hora de programar."
+ * Emite erro semântico com linha e interrompe a compilação.
+ * Decisão didática: estratégia fail-fast evita efeito cascata de erros derivados.
  */
 static void semantic_error(int line, const char *msg) {
     printf("ERRO: %s %d\n", msg, line);
@@ -91,10 +89,8 @@ static Scope *pop_scope(Scope *top) {
 }
 
 /*
- * O que o método faz: Procura uma variável especificamente no bloco ATUAL.
- * Papel no Pipeline: Semântico.
- * Regra da G-V1: Detecção de duplo-declaração de variável no mesmo nível.
- * Dica para a Banca: "Isso garante que um bloco não declare `int x; car x;`, mas permite que declare `x` caso o `x` de cima esteja em outro scope."
+ * Busca somente no escopo atual.
+ * Uso principal: impedir redeclaração no mesmo bloco.
  */
 static Sym *lookup_scope(Scope *s, const char *name) {
     for (Sym *it = s ? s->symbols : NULL; it; it = it->next) {
@@ -104,10 +100,8 @@ static Sym *lookup_scope(Scope *s, const char *name) {
 }
 
 /*
- * O que o método faz: Procura uma variável navegando de dentro para fora na pilha de escopos.
- * Papel no Pipeline: Semântico.
- * Regra da G-V1: O controle de escopo deve respeitar variáveis locais sobrepondo globais.
- * Dica para a Banca: "Esta é a magia que realiza o shadowing. Encontrou no nível mais baixo? Ele para e retorna, mascarando eventuais variáveis de mesmo nome fora dali."
+ * Busca do escopo interno para o externo.
+ * Este comportamento implementa shadowing de forma natural.
  */
 static Sym *lookup_all(Scope *top, const char *name) {
     for (Scope *s = top; s; s = s->prev) {
