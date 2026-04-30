@@ -129,6 +129,24 @@ Codegen não “entende texto”; ele “entende AST já validada”.
 ## Sobre labels
 `new_label` garante rótulos únicos (`if_else_3`, `while_start_7`, etc.) para não haver colisão em aninhamento.
 
+## Fluxo “de onde vem e para onde vai” (essencial)
+
+### Entrada do codegen
+- vem de `generate_code(&root_program, out)` em `main`;
+- `root_program` já passou por parser e semântica.
+
+### Processamento interno
+1. percorre AST para coletar strings de `escreva "..."`;
+2. constrói tabela local de símbolos do backend por escopo (`CGScope`);
+3. para cada expressão, calcula valores e emite instruções;
+4. para cada comando, emite efeito (I/O, atribuição, desvio).
+
+### Saída do codegen
+- escreve assembly MIPS em `FILE *out`;\n- normalmente dividido em `.data` (strings) + `.text` (instruções).
+
+### Tabela rápida de mapeamento
+- `Decl` -> `CGSym` -> offset em pilha\n- `Expr` -> instruções aritméticas/lógicas\n- `Stmt if/while` -> labels + branch/jump\n- `Stmt write` -> syscall de impressão\n- `Stmt read` -> syscall de leitura + store
+
 ---
 
 ## 7) `src/lexer.l` — Tokenização (entrada do parser)
@@ -151,4 +169,3 @@ Sem lexer, parser não recebe tokens e não opera.
 3. “Semântica usa pilha de escopos e tabela de símbolos.”
 4. “Codegen percorre AST validada e emite assembly.”
 5. “Escolhi arquitetura por fases para separar responsabilidades e facilitar evolução.”
-

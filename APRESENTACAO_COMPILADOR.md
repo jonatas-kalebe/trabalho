@@ -213,6 +213,54 @@ Após AST validada:
 - executa corpo
 - jump para rótulo de teste
 
+## 16.1 Fluxo de dados completo do codegen (de onde vem e para onde vai)
+
+Pense no codegen como uma “esteira” com entrada e saída:
+
+- **Entrada principal**: `Program/Block/Stmt/Expr` da AST (já validada pela semântica).
+- **Estado auxiliar**: tabela de símbolos do backend (`CGSym`), pilha de escopos (`CGScope`), labels e strings (`CodegenCtx`).
+- **Saída final**: texto assembly MIPS escrito em `FILE *out`.
+
+### Etapa A — Preparação da seção `.data` (strings)
+1. Codegen percorre AST procurando `ST_WRITE_STR`.
+2. Cada literal passa por `intern_string`.
+3. Se string já existe, reutiliza label; senão cria nova label (`new_label`).
+4. Na emissão, essas labels viram entradas `.asciiz`.
+
+**Resumo de fluxo**:\ntexto no código-fonte -> nó `ST_WRITE_STR` -> lista `CGString` -> label `.data` -> `la $a0, label` no `.text`.
+
+### Etapa B — Preparação de memória local (variáveis)
+1. Ao entrar em bloco: `cg_push_scope`.
+2. Para cada `Decl`, calcula `size` por tipo (`cg_type_size`).
+3. Acumula bytes locais e atualiza `offset` relativo ao frame pointer.
+4. Emite `addiu $sp, $sp, -N` para reservar espaço.
+
+**Resumo de fluxo**:\n`Decl` da AST -> `CGSym` (name/type/offset/size) -> endereço de pilha -> instruções `lw/sw/lb/sb`.
+
+### Etapa C — Expressões (valor em registradores temporários)
+1. `emit_expr` visita recursivamente a árvore.
+2. Folhas (constantes/variáveis) carregam valor.
+3. Nós internos (binários/unários) combinam resultados.
+4. Resultado final da expressão fica no registrador/protocolo esperado pelo statement chamador.
+
+**Pergunta de banca comum**:\n“Como sabe onde pegar variável `x`?”\nResposta: `cg_lookup` encontra `x` no escopo mais interno e retorna offset para acesso relativo ao frame.
+
+### Etapa D — Statements (efeitos colaterais e controle)
+- `ST_EXPR`: avalia expressão (ex.: atribuição) e aplica efeito.
+- `ST_READ`: syscall de entrada e armazenamento no offset da variável.
+- `ST_WRITE_EXPR`: avalia expressão e imprime.
+- `ST_IF`: cria labels de desvio condicional.
+- `ST_WHILE`: cria label de início, teste, corpo e retorno ao teste.
+- `ST_BLOCK`: abre e fecha escopo com push/pop.
+
+### Etapa E — Fechamento de bloco
+1. `cg_pop_scope` recupera bytes alocados no bloco.
+2. Emite `addiu $sp, $sp, +N`.
+3. Remove símbolos locais para manter shadowing correto entre blocos irmãos.
+
+### Caminho completo (1 linha para decorar)
+**Texto fonte -> tokens -> AST -> semântica válida -> codegen resolve símbolos/labels -> escreve `.data` e `.text` MIPS.**
+
 ---
 
 ## PARTE 6 — Perguntas difíceis (com resposta pronta)
