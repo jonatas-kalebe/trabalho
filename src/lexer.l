@@ -18,7 +18,7 @@ void yyerror(const char* s);
  * O que a estrutura faz: Tokenização de palavras-chave reservadas.
  * Papel no Pipeline: Léxico -> Sintático.
  * Regra da G-V1: Identificação da estrutura imperativa (se, enquanto, principal, int, car).
- * Dica para a Banca: "O Lexer transforma texto bruto nesses tokens fixos, evitando que o Parser tenha que lidar com strings, trabalhando apenas com inteiros constantes definidos pelo Bison."
+
  */
 "principal" { return TOK_PRINCIPAL; }
 "int"       { return TOK_INT; }
@@ -36,7 +36,7 @@ void yyerror(const char* s);
  * O que a estrutura faz: Tokenização de operadores lógicos, relacionais e aritméticos.
  * Papel no Pipeline: Léxico -> Sintático.
  * Regra da G-V1: Permite o aninhamento de cálculos matemáticos e booleanos na gramática.
- * Dica para a Banca: "Mapeamos os tokens de dois caracteres antes dos individuais (ex: <= antes de <) pela regra de prefixo mais longo do Flex."
+
  */
 "||"        { return TOK_OU; }
 "&&"        { return TOK_E; }
@@ -65,7 +65,7 @@ void yyerror(const char* s);
  * O que a estrutura faz: Extração de literais inteiros.
  * Papel no Pipeline: Léxico -> Sintático -> Árvore (AST).
  * Regra da G-V1: Checagem de tipos int e car e injeção do valor base.
- * Dica para a Banca: "O Flex já faz a conversão de ASCII pra int usando atoi() na própria fase léxica, populando yylval."
+
  */
 [0-9]+      { 
     yylval.ival = atoi(yytext); 
@@ -76,7 +76,7 @@ void yyerror(const char* s);
  * O que a estrutura faz: Extração e decode de caracteres, incluindo escape sequences (\n, \t).
  * Papel no Pipeline: Léxico -> Sintático -> Árvore (AST).
  * Regra da G-V1: Suporte a caracteres literais da linguagem.
- * Dica para a Banca: "Aplicamos a desambiguação de escapes (\\n) aqui mesmo, isolando o Parser do trabalho sujo de manipulação de strings."
+
  */
 \'([^\'\\]|\\.)\'   { 
     if (yytext[1] == '\\') {
@@ -100,7 +100,7 @@ void yyerror(const char* s);
  * O que a estrutura faz: Captura literais de string removendo aspas.
  * Papel no Pipeline: Léxico -> Sintático -> Gerador de Código MIPS.
  * Regra da G-V1: Comando 'escreva' exige string literal válida numa única linha.
- * Dica para a Banca: "Já recortamos as aspas aqui usando pointer arithmetics para enviar pro parser uma string pronta para o label .data."
+
  */
 \"[^\"\n]*\"  {
     // Remove aspas
@@ -113,7 +113,7 @@ void yyerror(const char* s);
  * O que a estrutura faz: Identificação de nomes de variáveis e funções.
  * Papel no Pipeline: Léxico -> Sintático -> Árvore (AST).
  * Regra da G-V1: Nomes começam com letra/underscore, seguidos de alfanuméricos.
- * Dica para a Banca: "Retornamos TOK_IDENT e clonamos a string pra que ela não seja varrida do buffer circular pelo scanner no próximo token."
+
  */
 [a-zA-Z_][a-zA-Z0-9_]* {
     yylval.sval = xstrdup(yytext);
@@ -124,7 +124,7 @@ void yyerror(const char* s);
  * O que a estrutura faz: Skip em whitespaces.
  * Papel no Pipeline: Léxico.
  * Regra da G-V1: A linguagem é format-free.
- * Dica para a Banca: "Simples devoração silenciosa de espaços; yylineno automatiza as quebras de linha pro yyerror."
+
  */
 [ \t\r]+    { /* Ignora espacos em branco */ }
 \n          { /* Controle de linha feito pelo %option yylineno */ }
@@ -135,7 +135,7 @@ void yyerror(const char* s);
  * O que a estrutura faz: Fallback e controle de erros léxicos estritos.
  * Papel no Pipeline: Léxico.
  * Regra da G-V1: Checagem estrita de caracteres não suportados, strings mal formadas e block comments abertos.
- * Dica para a Banca: "Essa é a rede de segurança. Se o token não casou com nada acima, abortamos elegantemente sem mandar lixo para o Parser."
+
  */
 .           { 
     printf("ERRO: CARACTERE INVALIDO %d\n", yylineno > 1 ? yylineno - 1 : 1);

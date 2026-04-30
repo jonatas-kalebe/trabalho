@@ -12,7 +12,7 @@ LIBS =
 SRCS = src/parser.tab.c src/lex.yy.c src/ast.c src/semantics.c src/codegen.c src/main.c
 OBJS = $(SRCS:.c=.o)
 
-TARGET = g-v1.exe
+TARGET = g-v1
 
 all: $(TARGET)
 

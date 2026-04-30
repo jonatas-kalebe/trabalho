@@ -12,7 +12,7 @@ extern FILE *yyin;
  * O que o método faz: Orquestra o fluxo de execução passando por léxico/sintático, semântico e geração de código.
  * Papel no Pipeline: Controlador Principal (Lexer->Parser->AST->Semântico->MIPS).
  * Regra da G-V1: Invocação unificada do compilador (LALR gerado pelo Bison via yyparse).
- * Dica para a Banca: "A main() atua como maestro. Se o yyparse falha, a AST nem nasce; se a semântica morre, o MIPS nunca é sujado."
+
  */
 int main(int argc, char** argv) {
     if (argc < 2) {

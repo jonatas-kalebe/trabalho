@@ -7,7 +7,7 @@
  * O que o método faz: Ponto de entrada do módulo semântico que percorre toda a AST validando tipos e escopo.
  * Papel no Pipeline: Semântico -> (Valida e prepara a árvore antes da Geração de Código MIPS).
  * Regra da G-V1: Validação de tipos (int, car) e verificação de variáveis em escopo antes do código rodar.
- * Dica para a Banca: "Esta função é o 'gatekeeper' do nosso compilador: só deixamos o gerador de MIPS trabalhar se o código estiver semanticamente impecável."
+
  */
 void check_semantics(Program *prog);
 
