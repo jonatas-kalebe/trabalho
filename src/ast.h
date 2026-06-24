@@ -1,288 +1,264 @@
+/* ============================================================================
+ *  ast.h  --  Definicao da Arvore Sintatica Abstrata (AST) da linguagem
+ *             Cafezinho / Goianinha.
+ *
+ *  CONCEITO (o que o professor pergunta):
+ *  --------------------------------------
+ *  A AST e a "Representacao Intermediaria" (RI) do programa. Depois que a
+ *  analise lexica (Flex) quebra o texto em tokens e a analise sintatica (Bison)
+ *  reconhece a estrutura gramatical, NAO trabalhamos mais com texto: montamos
+ *  esta arvore de structs em C. Todas as fases seguintes (analise semantica e
+ *  geracao de codigo MIPS) apenas "caminham" (percorrem) esta arvore.
+ *
+ *  Por que uma arvore?  Porque um programa e naturalmente hierarquico:
+ *  um programa contem funcoes, que contem blocos, que contem comandos, que
+ *  contem expressoes, que contem subexpressoes. A arvore captura exatamente
+ *  esse aninhamento.
+ * ==========================================================================*/
 #ifndef AST_H
 #define AST_H
 
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * O que a estrutura faz: Enumera os tipos de dados básicos suportados pela linguagem.
- * Papel no Pipeline: Árvore (AST) -> Semântico.
- * Regra da G-V1: Necessário para a checagem de tipos int e car.
-
- */
+/* ----------------------------------------------------------------------------
+ *  Tipos basicos da linguagem. So existem dois: inteiro e caractere.
+ *  (Em Cafezinho, 'car' e essencialmente um inteiro de 1 caractere ASCII.)
+ * --------------------------------------------------------------------------*/
 typedef enum {
     TYPE_INT,
     TYPE_CAR
 } Type;
 
-/*
- * O que a estrutura faz: Define os tipos de expressões possíveis na AST.
- * Papel no Pipeline: Árvore (AST) -> Semântico -> Gerador de Código MIPS.
- * Regra da G-V1: Distinção clara entre operadores e literais para simplificar o caminhamento da árvore.
+/* ----------------------------------------------------------------------------
+ *  CATEGORIA de uma variavel -- onde ela "mora" na memoria em tempo de
+ *  execucao. Isso e decidido na analise semantica e usado na geracao de codigo
+ *  para saber COMO acessar a variavel (via $s1, via $fp+, ou via $fp-).
+ *
+ *    CAT_GLOBAL : variavel global  -> acessada a partir do registrador $s1.
+ *    CAT_PARAM  : parametro de funcao -> acessado a partir de $fp + 4*indice.
+ *    CAT_LOCAL  : variavel local de bloco -> acessada a partir de $fp - 4*pos.
+ * --------------------------------------------------------------------------*/
+enum {
+    CAT_NONE = 0,   /* ainda nao resolvida pela semantica */
+    CAT_GLOBAL,
+    CAT_PARAM,
+    CAT_LOCAL
+};
 
- */
+/* ----------------------------------------------------------------------------
+ *  VarRef -- "anotacao" que a analise semantica grava em cada uso de variavel.
+ *  Quando o parser cria um no de variavel ele so conhece o NOME. A semantica
+ *  procura esse nome na tabela de simbolos e preenche aqui a categoria, a
+ *  posicao/indice, o tipo e se e vetor. A geracao de codigo le essas anotacoes.
+ *
+ *  Esse e um exemplo classico de "decoracao da AST": a arvore comeca crua
+ *  (so com a estrutura sintatica) e vai sendo enriquecida com informacao
+ *  semantica.
+ * --------------------------------------------------------------------------*/
+typedef struct {
+    int  category;   /* CAT_GLOBAL / CAT_PARAM / CAT_LOCAL                    */
+    int  position;   /* posicao (global/local) OU indice do parametro        */
+    Type type;       /* tipo do elemento                                     */
+    int  is_array;   /* 1 se a variavel declarada e um vetor                 */
+} VarRef;
+
+/* ----------------------------------------------------------------------------
+ *  Operadores unarios e binarios. A ordem nao importa para a semantica, mas
+ *  cada um vira uma (ou poucas) instrucoes MIPS na geracao de codigo.
+ * --------------------------------------------------------------------------*/
 typedef enum {
-    EX_VAR,
-    EX_INT,
-    EX_CHAR,
-    EX_ASSIGN,
-    EX_BINARY,
-    EX_UNARY
-} ExprKind;
-
-/*
- * O que a estrutura faz: Lista todas as operações unárias e binárias válidas.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Gerador de Código MIPS.
- * Regra da G-V1: Suporte a operações aritméticas, relacionais e lógicas do G-V1.
-
- */
-typedef enum {
-    OP_OR,
-    OP_AND,
-    OP_EQ,
-    OP_NE,
-    OP_LT,
-    OP_GT,
-    OP_GE,
-    OP_LE,
-    OP_ADD,
-    OP_SUB,
-    OP_MUL,
-    OP_DIV,
-    OP_NEG,
-    OP_NOT
+    OP_OR,   /* ||  */
+    OP_AND,  /* &&  */
+    OP_EQ,   /* ==  */
+    OP_NE,   /* !=  */
+    OP_LT,   /* <   */
+    OP_GT,   /* >   */
+    OP_GE,   /* >=  */
+    OP_LE,   /* <=  */
+    OP_ADD,  /* +   */
+    OP_SUB,  /* -   */
+    OP_MUL,  /* *   */
+    OP_DIV,  /* /   */
+    OP_NEG,  /* -  (menos unario) */
+    OP_NOT   /* !  (nao logico)   */
 } OpKind;
 
+/* ----------------------------------------------------------------------------
+ *  Os diferentes "formatos" de expressao. Usamos a tecnica de "tagged union":
+ *  um enum (kind) diz qual variante esta ativa, e uma union economiza memoria
+ *  guardando apenas os campos daquela variante.
+ * --------------------------------------------------------------------------*/
+typedef enum {
+    EX_INT,     /* constante inteira        ex: 42                            */
+    EX_CHAR,    /* constante caractere      ex: 'a'                           */
+    EX_VAR,     /* uso de variavel escalar  ex: n                            */
+    EX_ARRAY,   /* acesso a elemento de vetor ex: vet[i]                     */
+    EX_CALL,    /* chamada de funcao        ex: fatorial(n-1)                */
+    EX_ASSIGN,  /* atribuicao               ex: x = e   ou   vet[i] = e      */
+    EX_BINARY,  /* operacao binaria         ex: a + b                        */
+    EX_UNARY    /* operacao unaria          ex: -a  ou  !a                   */
+} ExprKind;
+
 typedef struct Expr Expr;
+typedef struct Arg  Arg;
 
-/*
- * O que a estrutura faz: Representa uma expressão binária com dois operandos.
- * Papel no Pipeline: Árvore (AST) -> Gerador de Código MIPS.
- * Regra da G-V1: Resolução de expressões matemáticas e booleanas.
-
- */
-typedef struct {
-    OpKind op;
-    Expr *left;
-    Expr *right;
-} BinaryExpr;
-
-/*
- * O que a estrutura faz: Representa uma expressão unária, como negação aritmética ou lógica.
- * Papel no Pipeline: Árvore (AST) -> Gerador de Código MIPS.
- * Regra da G-V1: Suporte a operadores unários de sinal e negação.
-
- */
-typedef struct {
-    OpKind op;
-    Expr *expr;
-} UnaryExpr;
-
-/*
- * O que a estrutura faz: Estrutura genérica (variant/union) que modela qualquer nó de expressão na AST.
- * Papel no Pipeline: Árvore (AST) -> Semântico -> Gerador de Código MIPS.
- * Regra da G-V1: A gestão de memória usa uma AST compacta.
-
- */
+/* No de expressao. 'inferred_type' e 'is_array_result' sao preenchidos pela
+ * analise semantica (tipo resultante da expressao). */
 struct Expr {
     ExprKind kind;
-    int line;
-    Type inferred_type;
+    int      line;             /* linha do codigo-fonte (para mensagens)     */
+    Type     inferred_type;    /* tipo calculado pela semantica              */
+    int      is_array_result;  /* 1 se a expressao denota um vetor inteiro   */
     union {
-        char *name;
-        int int_value;
-        int char_value;
-        struct {
-            char *name;
-            Expr *value;
+        int int_value;                                   /* EX_INT          */
+        int char_value;                                  /* EX_CHAR         */
+        struct { char *name; VarRef ref; } var;          /* EX_VAR          */
+        struct { char *name; Expr *index; VarRef ref; } arr;   /* EX_ARRAY  */
+        struct { char *name; Arg *args; int argc; } call;      /* EX_CALL   */
+        struct {                                         /* EX_ASSIGN       */
+            char  *name;
+            Expr  *index;   /* NULL => atribuicao a escalar; senao a vet[i]  */
+            Expr  *value;
+            VarRef ref;
         } assign;
-        BinaryExpr bin;
-        UnaryExpr un;
+        struct { OpKind op; Expr *left, *right; } bin;   /* EX_BINARY       */
+        struct { OpKind op; Expr *operand; } un;         /* EX_UNARY        */
     } as;
 };
 
-/*
- * O que a estrutura faz: Representa a declaração de uma variável em um bloco.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Semântico.
- * Regra da G-V1: Definição de escopo e variáveis locais.
+/* Lista ligada de argumentos de uma chamada de funcao. */
+struct Arg {
+    Expr *expr;
+    Arg  *next;
+};
 
- */
+/* ----------------------------------------------------------------------------
+ *  Declaracao de variavel (em 'global[...]' ou no '[...]' de um bloco).
+ *  'category' e 'position' sao anotados pela semantica (vide VarRef acima).
+ * --------------------------------------------------------------------------*/
 typedef struct Decl {
     char *name;
-    Type type;
-    int line;
+    Type  type;
+    int   is_array;     /* 1 se vetor                                        */
+    int   array_size;   /* tamanho do vetor (valido se is_array)             */
+    int   line;
+    int   category;     /* CAT_GLOBAL ou CAT_LOCAL (anotado pela semantica)  */
+    int   position;     /* posicao na area de globais/locais                 */
     struct Decl *next;
 } Decl;
 
+/* ----------------------------------------------------------------------------
+ *  Parametro formal de uma funcao. Pode ser escalar (n:int) ou vetor (v[]:int).
+ *  Vetores sao passados POR REFERENCIA (passa-se o endereco base).
+ * --------------------------------------------------------------------------*/
+typedef struct Param {
+    char *name;
+    Type  type;
+    int   is_array;
+    int   line;
+    int   index;        /* indice do parametro (1..n), anotado pela semantica */
+    struct Param *next;
+} Param;
+
 typedef struct Block Block;
 
-/*
- * O que a estrutura faz: Enumera os tipos de comandos/statements da linguagem.
- * Papel no Pipeline: Árvore (AST) -> Semântico -> Gerador de Código MIPS.
- * Regra da G-V1: Controle de fluxo e comandos nativos como leia e escreva.
-
- */
+/* ----------------------------------------------------------------------------
+ *  Os tipos de comando (statement) da linguagem.
+ * --------------------------------------------------------------------------*/
 typedef enum {
-    ST_EMPTY,
-    ST_EXPR,
-    ST_READ,
-    ST_WRITE_EXPR,
-    ST_WRITE_STR,
-    ST_NEWLINE,
-    ST_IF,
-    ST_WHILE,
-    ST_BLOCK
+    ST_EMPTY,       /* ;                                                     */
+    ST_EXPR,        /* expressao usada como comando (ex: chamada, atribuicao)*/
+    ST_RETURN,      /* retorne Expr;                                         */
+    ST_READ,        /* leia lvalue;                                          */
+    ST_WRITE_EXPR,  /* escreva Expr;                                         */
+    ST_WRITE_STR,   /* escreva "texto";                                      */
+    ST_NEWLINE,     /* novalinha;                                            */
+    ST_IF,          /* se (..) entao .. [senao ..] fimse                     */
+    ST_WHILE,       /* enquanto (..) ..                                      */
+    ST_BLOCK        /* um bloco aninhado [decls]{cmds}                       */
 } StmtKind;
 
-/*
- * O que a estrutura faz: Estrutura genérica que modela comandos lógicos, de I/O ou controle de fluxo.
- * Papel no Pipeline: Árvore (AST) -> Semântico -> Gerador de Código MIPS.
- * Regra da G-V1: A gestão de memória usa uma AST compacta para as estruturas de controle.
-
- */
 typedef struct Stmt {
     StmtKind kind;
-    int line;
-    struct Stmt *next;
+    int      line;
+    struct Stmt *next;     /* comandos sao encadeados em sequencia           */
     union {
-        Expr *expr;
-        char *name;
-        struct {
-            Expr *cond;
-            struct Stmt *then_branch;
-            struct Stmt *else_branch;
-        } if_stmt;
-        struct {
-            Expr *cond;
-            struct Stmt *body;
-        } while_stmt;
-        Block *block;
-        struct {
-            char *text;
-            char *label;
-        } write_str;
+        Expr *expr;                                  /* EXPR/RETURN/WRITE_EXPR */
+        struct { char *name; Expr *index; VarRef ref; } read; /* ST_READ      */
+        struct { char *text; char *label; } wstr;    /* ST_WRITE_STR          */
+        struct { Expr *cond; struct Stmt *then_branch;
+                 struct Stmt *else_branch; } if_s;    /* ST_IF                 */
+        struct { Expr *cond; struct Stmt *body; } while_s; /* ST_WHILE         */
+        Block *block;                                /* ST_BLOCK              */
     } as;
 } Stmt;
 
-/*
- * O que a estrutura faz: Representa um bloco de código (escopo) com declarações e comandos.
- * Papel no Pipeline: Árvore (AST) -> Semântico -> Gerador de Código MIPS.
- * Regra da G-V1: O controle de escopo deve respeitar variáveis locais sobrepondo globais ao bloco (shadowing).
-
- */
+/* ----------------------------------------------------------------------------
+ *  Bloco = uma area de declaracoes opcionais seguida de uma sequencia de
+ *  comandos. Cada bloco aninhado abre um novo ESCOPO (conceito central).
+ * --------------------------------------------------------------------------*/
 struct Block {
-    Decl *decls;
-    Stmt *commands;
-    int line;
+    Decl *decls;       /* lista de declaracoes locais (pode ser NULL)        */
+    Stmt *commands;    /* lista de comandos                                  */
+    int   line;
 };
 
-/*
- * O que a estrutura faz: Define o nó raiz de todo o programa compilado.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Gerador de Código MIPS.
- * Regra da G-V1: Ponto de partida ('principal') da estrutura G-V1.
+/* ----------------------------------------------------------------------------
+ *  Funcao. Lista ligada (varias funcoes dentro de 'funcao[...]').
+ * --------------------------------------------------------------------------*/
+typedef struct Func {
+    char  *name;
+    Param *params;
+    int    param_count;
+    Type   return_type;
+    Block *body;
+    int    line;
+    struct Func *next;
+} Func;
 
- */
+/* ----------------------------------------------------------------------------
+ *  No raiz: o programa inteiro. Globais + funcoes + bloco principal.
+ * --------------------------------------------------------------------------*/
 typedef struct {
-    Block *block;
+    Decl *globals;       /* variaveis globais (pode ser NULL)                */
+    Func *functions;     /* funcoes do programa (pode ser NULL)              */
+    Block *main_block;   /* corpo de 'principal'                             */
 } Program;
 
-// Function declarations for AST node creation
-
-/*
- * O que o método faz: Instancia um nó de expressão referenciando uma variável.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Acesso a variáveis definidas no escopo.
-
- */
-Expr *new_expr_var(char *name, int line);
-
-/*
- * O que o método faz: Cria um nó de literal inteiro.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Conversão de lexemas númericos.
-
- */
-Expr *new_expr_int(int value, int line);
-
-/*
- * O que o método faz: Cria um nó de literal do tipo car (caractere).
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Checagem de tipos int e car e gerenciamento de valores.
-
- */
-Expr *new_expr_char(int value, int line);
-
-/*
- * O que o método faz: Cria nó de atribuição (x = exp).
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Garantir corretude na atualização de variáveis na memória (stack/MIPS).
-
- */
-Expr *new_expr_assign(char *name, Expr *value, int line);
-
-/*
- * O que o método faz: Constroi um nó de operação binária (+, -, *, etc).
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Formação correta de precedências matemáticas vindas do Bison.
-
- */
+/* ============================================================================
+ *  Construtores -- funcoes "new_*" que alocam e inicializam cada tipo de no.
+ *  O parser (parser.y) chama estas funcoes nas acoes semanticas para montar
+ *  a AST de baixo para cima (bottom-up), conforme reduz as regras.
+ * ==========================================================================*/
+Expr *new_expr_int   (int value, int line);
+Expr *new_expr_char  (int value, int line);
+Expr *new_expr_var   (char *name, int line);
+Expr *new_expr_array (char *name, Expr *index, int line);
+Expr *new_expr_call  (char *name, Arg *args, int line);
+Expr *new_expr_assign(char *name, Expr *index, Expr *value, int line);
 Expr *new_expr_binary(OpKind op, Expr *left, Expr *right, int line);
+Expr *new_expr_unary (OpKind op, Expr *operand, int line);
+Arg  *new_arg        (Expr *expr);
 
-/*
- * O que o método faz: Constroi nó de operação unária.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Modelagem de operadores unários na lógica do G-V1.
+Decl  *new_decl  (char *name, Type type, int is_array, int array_size, int line);
+Param *new_param (char *name, Type type, int is_array, int line);
+Block *new_block (Decl *decls, Stmt *commands, int line);
+Func  *new_func  (char *name, Param *params, Type return_type, Block *body, int line);
 
- */
-Expr *new_expr_unary(OpKind op, Expr *expr, int line);
-
-/*
- * O que o método faz: Aloca um registro de declaração de variável.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Controle de variáveis e tabela de símbolos.
-
- */
-Decl *new_decl(char *name, Type type, int line);
-
-/*
- * O que o método faz: Criações de statements e nós de comando da linguagem.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Mapear comandos como leia, escreva, loops e condicional se-entao-senao.
-
- */
-Stmt *new_stmt_empty(int line);
-Stmt *new_stmt_expr(Expr *expr, int line);
-Stmt *new_stmt_read(char *name, int line);
+Stmt *new_stmt_empty     (int line);
+Stmt *new_stmt_expr      (Expr *expr, int line);
+Stmt *new_stmt_return    (Expr *expr, int line);
+Stmt *new_stmt_read      (char *name, Expr *index, int line);
 Stmt *new_stmt_write_expr(Expr *expr, int line);
-Stmt *new_stmt_write_str(char *text, int line);
-Stmt *new_stmt_newline(int line);
-Stmt *new_stmt_if(Expr *cond, Stmt *then_branch, Stmt *else_branch, int line);
-Stmt *new_stmt_while(Expr *cond, Stmt *body, int line);
-Stmt *new_stmt_block(Block *block, int line);
+Stmt *new_stmt_write_str (char *text, int line);
+Stmt *new_stmt_newline   (int line);
+Stmt *new_stmt_if        (Expr *cond, Stmt *then_b, Stmt *else_b, int line);
+Stmt *new_stmt_while     (Expr *cond, Stmt *body, int line);
+Stmt *new_stmt_block     (Block *block, int line);
 
-/*
- * O que o método faz: Associa uma lista de declarações a uma lista de comandos no mesmo bloco.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Implementação de escopo modular baseado em blocos.
+/* Utilitarios. */
+void  die_alloc(void);            /* aborta em caso de falta de memoria       */
+char *xstrdup(const char *s);     /* strdup portatil (ANSI C estrito)         */
 
- */
-Block *new_block(Decl *decls, Stmt *commands, int line);
-
-// Utility functions
-/*
- * O que o método faz: Trata de erros de alocação (out-of-memory).
- * Papel no Pipeline: Global -> Aborta o processo.
- * Regra da G-V1: Manter a integridade caso o host perca recursos de heap.
-
- */
-void die_alloc(void);
-
-/*
- * O que o método faz: Criação customizada da rotina strdup (que nem sempre está na libc padrão com strict ANSI).
- * Papel no Pipeline: Léxico -> Sintático -> Árvore (AST).
- * Regra da G-V1: Clonagem segura de nomes de variáveis vindas do buffer do Lexer (Bison/Flex).
-
- */
-char *xstrdup(const char *s);
-
-#endif
+#endif /* AST_H */

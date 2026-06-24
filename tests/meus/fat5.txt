@@ -1,0 +1,15 @@
+funcao [
+	fat(n:int):int {
+		se (n==0)
+		entao
+			retorne 1;
+		senao
+			retorne n * fat(n-1);
+		fimse
+	}
+]
+principal {
+	escreva "fatorial de 5 = ";
+	escreva fat(5);
+	novalinha;
+}

@@ -1,101 +1,91 @@
-#include <stdio.h>
+/* ============================================================================
+ *  ast.c  --  Implementacao dos construtores da AST.
+ *
+ *  Cada funcao aqui apenas: (1) aloca um no, (2) preenche os campos, (3)
+ *  devolve o ponteiro. Sao "fabricas" de nos. Manter isso separado deixa o
+ *  parser.y limpo: nas acoes do Bison escrevemos so 'new_expr_binary(...)'.
+ * ==========================================================================*/
 #include "ast.h"
+#include <stdio.h>
 
-/*
- * O que o método faz: Encerra o compilador relatando falha em alocação de memória.
- * Papel no Pipeline: Auxiliar / Árvore (AST).
- * Regra da G-V1: A gestão de memória usa uma AST compacta e exige resiliência.
-
- */
+/* Aborta o programa quando malloc falha. Em um compilador real trataria
+ * melhor, mas para fins didaticos basta avisar e sair. */
 void die_alloc(void) {
-    fprintf(stderr, "ERRO: FALHA DE MEMORIA\n");
+    fprintf(stderr, "ERRO INTERNO: memoria insuficiente\n");
     exit(1);
 }
 
-/*
- * O que o método faz: Copia de forma segura uma string (lexema) para uma nova área de memória.
- * Papel no Pipeline: Léxico -> Sintático -> Árvore (AST).
- * Regra da G-V1: Isolar o ciclo de vida do buffer do Lexer das strings alocadas na árvore.
-
- */
+/* strdup nao faz parte do C ANSI estrito; implementamos a nossa para
+ * copiar com seguranca os nomes que vem do buffer do Flex (yytext). */
 char *xstrdup(const char *s) {
-    size_t n = strlen(s);
-    char *r = (char *)malloc(n + 1);
-    if (!r) die_alloc();
-    memcpy(r, s, n + 1);
-    return r;
+    if (!s) return NULL;
+    size_t n = strlen(s) + 1;
+    char *p = (char *)malloc(n);
+    if (!p) die_alloc();
+    memcpy(p, s, n);
+    return p;
 }
 
-/*
- * O que o método faz: Aloca dinamicamente um nó genérico da árvore de expressões.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: A gestão de memória usa uma AST compacta (função central de alocação de expressões).
-
- */
-static Expr *alloc_expr(ExprKind k, int line) {
+/* Helper interno: aloca um Expr ja com kind e linha preenchidos. */
+static Expr *alloc_expr(ExprKind kind, int line) {
     Expr *e = (Expr *)calloc(1, sizeof(Expr));
     if (!e) die_alloc();
-    e->kind = k;
+    e->kind = kind;
     e->line = line;
-    e->inferred_type = TYPE_INT;
+    e->inferred_type = TYPE_INT;   /* default; a semantica corrige           */
+    e->is_array_result = 0;
     return e;
 }
 
-/*
- * O que o método faz: Retorna um novo nó representando uma variável.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: O controle de escopo precisará deste identificador na tabela depois.
+/* ---- Expressoes -----------------------------------------------------------*/
 
- */
-Expr *new_expr_var(char *name, int line) {
-    Expr *e = alloc_expr(EX_VAR, line);
-    e->as.name = name;
-    return e;
-}
-
-/*
- * O que o método faz: Cria um nó primitivo na AST para lidar com literais do tipo inteiro.
- * Papel no Pipeline: Léxico -> Sintático -> Árvore (AST).
- * Regra da G-V1: Tipo base de literais inteiros da G-V1.
-
- */
 Expr *new_expr_int(int value, int line) {
     Expr *e = alloc_expr(EX_INT, line);
     e->as.int_value = value;
     return e;
 }
 
-/*
- * O que o método faz: Cria um nó primitivo na AST para literal de caractere.
- * Papel no Pipeline: Léxico -> Sintático -> Árvore (AST).
- * Regra da G-V1: Tipo base de literais caracteres da G-V1.
-
- */
 Expr *new_expr_char(int value, int line) {
     Expr *e = alloc_expr(EX_CHAR, line);
     e->as.char_value = value;
     return e;
 }
 
-/*
- * O que o método faz: Fabrica nó da AST correspondente a uma atribuição (ex: a = b + 1).
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Semântico.
- * Regra da G-V1: Construção da l-value para o gerador e update no escopo.
-
- */
-Expr *new_expr_assign(char *name, Expr *value, int line) {
-    Expr *e = alloc_expr(EX_ASSIGN, line);
-    e->as.assign.name = name;
-    e->as.assign.value = value;
+Expr *new_expr_var(char *name, int line) {
+    Expr *e = alloc_expr(EX_VAR, line);
+    e->as.var.name = name;
+    e->as.var.ref.category = CAT_NONE;
     return e;
 }
 
-/*
- * O que o método faz: Anexa dois nós operandos (left, right) a uma operação binária.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Implementação hierárquica das precedências aritméticas do parser Bison.
+Expr *new_expr_array(char *name, Expr *index, int line) {
+    Expr *e = alloc_expr(EX_ARRAY, line);
+    e->as.arr.name = name;
+    e->as.arr.index = index;
+    e->as.arr.ref.category = CAT_NONE;
+    return e;
+}
 
- */
+Expr *new_expr_call(char *name, Arg *args, int line) {
+    Expr *e = alloc_expr(EX_CALL, line);
+    e->as.call.name = name;
+    e->as.call.args = args;
+    /* conta os argumentos uma unica vez aqui */
+    int c = 0;
+    for (Arg *a = args; a; a = a->next) c++;
+    e->as.call.argc = c;
+    return e;
+}
+
+Expr *new_expr_assign(char *name, Expr *index, Expr *value, int line) {
+    Expr *e = alloc_expr(EX_ASSIGN, line);
+    e->as.assign.name  = name;
+    e->as.assign.index = index;   /* NULL = escalar; != NULL = elemento vetor */
+    e->as.assign.value = value;
+    e->as.assign.ref.category = CAT_NONE;
+    return e;
+}
+
 Expr *new_expr_binary(OpKind op, Expr *left, Expr *right, int line) {
     Expr *e = alloc_expr(EX_BINARY, line);
     e->as.bin.op = op;
@@ -104,41 +94,74 @@ Expr *new_expr_binary(OpKind op, Expr *left, Expr *right, int line) {
     return e;
 }
 
-/*
- * O que o método faz: Empacota um nó operando com um modificador lógico ou sinal.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Aplicação de modificadores sobre expressões existentes (como negativo unário).
-
- */
-Expr *new_expr_unary(OpKind op, Expr *expr, int line) {
+Expr *new_expr_unary(OpKind op, Expr *operand, int line) {
     Expr *e = alloc_expr(EX_UNARY, line);
     e->as.un.op = op;
-    e->as.un.expr = expr;
+    e->as.un.operand = operand;
     return e;
 }
 
-/*
- * O que o método faz: Inicializa as meta-informações de uma nova declaração formal de variável.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Semântico.
- * Regra da G-V1: O controle de escopo deve respeitar variáveis locais; isto modela a variável.
+Arg *new_arg(Expr *expr) {
+    Arg *a = (Arg *)calloc(1, sizeof(Arg));
+    if (!a) die_alloc();
+    a->expr = expr;
+    a->next = NULL;
+    return a;
+}
 
- */
-Decl *new_decl(char *name, Type type, int line) {
+/* ---- Declaracoes, parametros, blocos e funcoes ---------------------------*/
+
+Decl *new_decl(char *name, Type type, int is_array, int array_size, int line) {
     Decl *d = (Decl *)calloc(1, sizeof(Decl));
     if (!d) die_alloc();
     d->name = name;
     d->type = type;
+    d->is_array = is_array;
+    d->array_size = array_size;
     d->line = line;
+    d->category = CAT_NONE;
     d->next = NULL;
     return d;
 }
 
-/*
- * O que o método faz: Aloca genericamente um bloco de Comando (Statement) vazio/virgem na memória.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: A gestão de memória usa uma AST compacta para ramificações lógicas.
+Param *new_param(char *name, Type type, int is_array, int line) {
+    Param *p = (Param *)calloc(1, sizeof(Param));
+    if (!p) die_alloc();
+    p->name = name;
+    p->type = type;
+    p->is_array = is_array;
+    p->line = line;
+    p->next = NULL;
+    return p;
+}
 
- */
+Block *new_block(Decl *decls, Stmt *commands, int line) {
+    Block *b = (Block *)calloc(1, sizeof(Block));
+    if (!b) die_alloc();
+    b->decls = decls;
+    b->commands = commands;
+    b->line = line;
+    return b;
+}
+
+Func *new_func(char *name, Param *params, Type return_type, Block *body, int line) {
+    Func *f = (Func *)calloc(1, sizeof(Func));
+    if (!f) die_alloc();
+    f->name = name;
+    f->params = params;
+    f->return_type = return_type;
+    f->body = body;
+    f->line = line;
+    f->next = NULL;
+    /* conta os parametros */
+    int c = 0;
+    for (Param *p = params; p; p = p->next) c++;
+    f->param_count = c;
+    return f;
+}
+
+/* ---- Comandos -------------------------------------------------------------*/
+
 static Stmt *alloc_stmt(StmtKind kind, int line) {
     Stmt *s = (Stmt *)calloc(1, sizeof(Stmt));
     if (!s) die_alloc();
@@ -148,125 +171,64 @@ static Stmt *alloc_stmt(StmtKind kind, int line) {
     return s;
 }
 
-/*
- * O que o método faz: Cria um placeholder para comandos vazios (ex. `;` extra).
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Resiliência contra excesso de delimitadores sem perder controle de linha.
-
- */
 Stmt *new_stmt_empty(int line) {
     return alloc_stmt(ST_EMPTY, line);
 }
 
-/*
- * O que o método faz: Promove uma expressão a um statement, para suportar execução procedural de cálculos isolados.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Permite que operações como atribuição entrem num bloco de forma autônoma.
-
- */
 Stmt *new_stmt_expr(Expr *expr, int line) {
     Stmt *s = alloc_stmt(ST_EXPR, line);
     s->as.expr = expr;
     return s;
 }
 
-/*
- * O que o método faz: Prepara o nó sintático que disparará o sys call MIPS de leitura.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Gerador de Código MIPS.
- * Regra da G-V1: Interface de entrada de dados interativa.
-
- */
-Stmt *new_stmt_read(char *name, int line) {
-    Stmt *s = alloc_stmt(ST_READ, line);
-    s->as.name = name;
+Stmt *new_stmt_return(Expr *expr, int line) {
+    Stmt *s = alloc_stmt(ST_RETURN, line);
+    s->as.expr = expr;
     return s;
 }
 
-/*
- * O que o método faz: Monta um nó para exibição condicional do resultado de expressões no console.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Comando 'escreva' atrelado a processamento.
+Stmt *new_stmt_read(char *name, Expr *index, int line) {
+    Stmt *s = alloc_stmt(ST_READ, line);
+    s->as.read.name = name;
+    s->as.read.index = index;
+    s->as.read.ref.category = CAT_NONE;
+    return s;
+}
 
- */
 Stmt *new_stmt_write_expr(Expr *expr, int line) {
     Stmt *s = alloc_stmt(ST_WRITE_EXPR, line);
     s->as.expr = expr;
     return s;
 }
 
-/*
- * O que o método faz: Nós para printagem de literais de string (mensagens diretas).
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Gerador de Código MIPS (seção .data).
- * Regra da G-V1: Escrever constantes estáticas (label base).
-
- */
 Stmt *new_stmt_write_str(char *text, int line) {
     Stmt *s = alloc_stmt(ST_WRITE_STR, line);
-    s->as.write_str.text = text;
-    s->as.write_str.label = NULL;
+    s->as.wstr.text = text;
+    s->as.wstr.label = NULL;   /* rotulo .data atribuido na geracao de codigo */
     return s;
 }
 
-/*
- * O que o método faz: Gera a instrução para quebrar a linha no output padrão.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Formatação de I/O de acordo com o comando 'novalinha'.
-
- */
 Stmt *new_stmt_newline(int line) {
     return alloc_stmt(ST_NEWLINE, line);
 }
 
-/*
- * O que o método faz: Aloca a bifurcação de controle de fluxo condicional com ou sem ELSE.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Gerador de Código MIPS.
- * Regra da G-V1: Estruturas de decisão lógicas ('se').
-
- */
-Stmt *new_stmt_if(Expr *cond, Stmt *then_branch, Stmt *else_branch, int line) {
+Stmt *new_stmt_if(Expr *cond, Stmt *then_b, Stmt *else_b, int line) {
     Stmt *s = alloc_stmt(ST_IF, line);
-    s->as.if_stmt.cond = cond;
-    s->as.if_stmt.then_branch = then_branch;
-    s->as.if_stmt.else_branch = else_branch;
+    s->as.if_s.cond = cond;
+    s->as.if_s.then_branch = then_b;
+    s->as.if_s.else_branch = else_b;
     return s;
 }
 
-/*
- * O que o método faz: Empacota a estrutura cíclica contendo Condição e Corpo a ser repetido.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Gerador de Código MIPS.
- * Regra da G-V1: Representar o comando 'enquanto' da G-V1 com desvios (branchs).
-
- */
 Stmt *new_stmt_while(Expr *cond, Stmt *body, int line) {
     Stmt *s = alloc_stmt(ST_WHILE, line);
-    s->as.while_stmt.cond = cond;
-    s->as.while_stmt.body = body;
+    s->as.while_s.cond = cond;
+    s->as.while_s.body = body;
     return s;
 }
 
-/*
- * O que o método faz: Cria um sub-comando que encapsula um Bloco interior completo.
- * Papel no Pipeline: Sintático -> Árvore (AST) -> Semântico.
- * Regra da G-V1: Controle de sub-escopos permitindo shadowing modular.
-
- */
 Stmt *new_stmt_block(Block *block, int line) {
     Stmt *s = alloc_stmt(ST_BLOCK, line);
     s->as.block = block;
     return s;
-}
-
-/*
- * O que o método faz: Combina lista de declarações de topo de bloco com os comandos executáveis.
- * Papel no Pipeline: Sintático -> Árvore (AST).
- * Regra da G-V1: Unidade básica de organização e escopo do G-V1.
-
- */
-Block *new_block(Decl *decls, Stmt *commands, int line) {
-    Block *b = (Block *)calloc(1, sizeof(Block));
-    if (!b) die_alloc();
-    b->decls = decls;
-    b->commands = commands;
-    b->line = line;
-    return b;
 }

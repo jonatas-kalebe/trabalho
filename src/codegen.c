@@ -1,439 +1,502 @@
-#include <stdio.h>
+/* ============================================================================
+ *  codegen.c  --  Geracao de codigo MIPS (maquina de pilha com 1 acumulador).
+ *
+ *  IDEIA CENTRAL (a pergunta classica do professor):
+ *  -------------------------------------------------
+ *  "Como gerar codigo para uma expressao sem usar muitos registradores?"
+ *  Resposta: usamos uma MAQUINA DE PILHA. Cada expressao deixa seu resultado
+ *  no ACUMULADOR ($s0) e PRESERVA a pilha (invariante). Para um operador
+ *  binario op(e1, e2):
+ *      1. calcula e1            -> resultado em $s0
+ *      2. empilha $s0           (guarda e1 na pilha)
+ *      3. calcula e2            -> resultado em $s0
+ *      4. desempilha e1 em $t1
+ *      5. aplica op: $s0 = $t1 op $s0
+ *  Como os valores intermediarios vivem na PILHA (e nao em registradores),
+ *  o esquema funciona para expressoes de qualquer profundidade e sobrevive
+ *  ate a chamadas de funcao recursivas.
+ *
+ *  ORGANIZACAO DA MEMORIA (slides "Ambiente de Execucao"):
+ *      - Globais: area apontada por $s1 (fixa durante toda a execucao).
+ *      - Cada funcao ativa tem um REGISTRO DE ATIVACAO (frame) na pilha,
+ *        apontado por $fp, contendo: $fp do chamador, argumentos, $ra e as
+ *        variaveis locais. A pilha de frames simula a "arvore de ativacao".
+ * ==========================================================================*/
+#include "codegen.h"
 #include <stdlib.h>
 #include <string.h>
-#include "codegen.h"
+#include <stdarg.h>
 
-/*
- * O que a estrutura faz: Mapeia uma variável no contexto do gerador de código.
- * Papel no Pipeline: Gerador de Código MIPS (Manutenção de Memória Local).
- * Regra da G-V1: Cálculo de offsets no MIPS baseados no frame pointer ($fp).
-
- */
-typedef struct CGSym {
-    char *name;
-    Type type;
-    int offset;
-    int size;
-    struct CGSym *next;
-} CGSym;
-
-/*
- * O que a estrutura faz: Representa uma literal de string (para comandos de escreva).
- * Papel no Pipeline: Gerador de Código MIPS (Seção .data).
- * Regra da G-V1: Suporte a print de literais.
-
- */
-typedef struct CGString {
-    char *text;
-    char *label;
-    struct CGString *next;
-} CGString;
-
-/*
- * O que a estrutura faz: Representa o ambiente léxico momentâneo para alocação no MIPS.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: O controle de escopo deve respeitar variáveis locais sobrepondo globais ao bloco (shadowing).
-
- */
-typedef struct CGScope {
-    CGSym *symbols;
-    int alloc_size;
-    struct CGScope *prev;
-} CGScope;
-
-/*
- * O que a estrutura faz: Carrega o estado global (labels, contadores, out file) do assembly.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Contexto de arquitetura para a fase de emissão.
-
- */
+/* ---------------------------------------------------------------------------
+ *  Estado global da geracao de codigo.
+ * -------------------------------------------------------------------------*/
 typedef struct {
     FILE *out;
-    CGString *strings;
-    int string_count;
-    int label_count;
-    CGScope *top;
-    int depth;
-} CodegenCtx;
+    int   label_id;          /* gera rotulos unicos (if/while)               */
 
-/*
- * O que o método faz: Retorna 4 para INT e 1 para CAR.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Suporte aos tamanhos exatos das variáveis na pilha ($sp).
+    /* tabela de strings literais -> rotulos no segmento .data */
+    char **str_text;
+    char **str_label;
+    int    str_count;
+    int    str_cap;
 
- */
-static int cg_type_size(Type t) {
-    return (t == TYPE_INT) ? 4 : 1;
+    /* contexto da funcao sendo gerada */
+    const char *cur_epilogue;/* rotulo do epilogo (destino do 'retorne')     */
+    int   cur_param_count;   /* numero de parametros (para limpar a pilha)    */
+} Gen;
+
+/* impressao formatada no arquivo de saida (atalho) */
+static void emit(Gen *g, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(g->out, fmt, ap);
+    va_end(ap);
+    fputc('\n', g->out);
 }
 
-/*
- * O que o método faz: Busca as meta-informações de MIPS de uma variável já validada.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Resolução de endereços locais por shadowing.
+/* gera um numero de rotulo unico */
+static int new_label(Gen *g) { return g->label_id++; }
 
- */
-static CGSym *cg_lookup(CodegenCtx *cg, const char *name) {
-    for (CGScope *s = cg->top; s; s = s->prev) {
-        for (CGSym *it = s->symbols; it; it = it->next) {
-            if (strcmp(it->name, name) == 0) return it;
-        }
+/* protótipos (recursao mutua) */
+static void cgen_expr(Gen *g, Expr *e);
+static void cgen_stmt(Gen *g, Stmt *st);
+static void cgen_block(Gen *g, Block *b, int allocate_locals);
+
+/* ===========================================================================
+ *  Coleta de strings literais (comando 'escreva "..."').
+ *  Cada string vira um rotulo strN no segmento .data. Fazemos uma passada
+ *  previa pela AST para descobrir todas e atribuir rotulos.
+ * =========================================================================*/
+static void add_string(Gen *g, Stmt *st) {
+    if (g->str_count == g->str_cap) {
+        g->str_cap = g->str_cap ? g->str_cap * 2 : 8;
+        g->str_text  = realloc(g->str_text,  g->str_cap * sizeof(char*));
+        g->str_label = realloc(g->str_label, g->str_cap * sizeof(char*));
+        if (!g->str_text || !g->str_label) die_alloc();
     }
-    return NULL;
+    char buf[32];
+    snprintf(buf, sizeof buf, "str%d", g->str_count);
+    st->as.wstr.label = xstrdup(buf);   /* grava o rotulo no proprio no */
+    g->str_text[g->str_count]  = st->as.wstr.text;
+    g->str_label[g->str_count] = st->as.wstr.label;
+    g->str_count++;
 }
 
-/*
- * O que o método faz: Fornece nomes de labels únicos e sequenciais (ex: while_start_3).
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Implementação de branches para 'se' e 'enquanto'.
-
- */
-static char *new_label(CodegenCtx *cg, const char *prefix) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%s_%d", prefix, cg->label_count++);
-    return xstrdup(buf);
-}
-
-/*
- * O que o método faz: Adiciona escapes corretos para a seção .asciiz do MIPS.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Formatação de strings no assembly.
-
- */
-static char *mips_escape_string(const char *s) {
-    size_t n = 0;
-    for (const char *p = s; *p; p++) {
-        if (*p == '\\' || *p == '"') n += 2;
-        else if (*p == '\n' || *p == '\t' || *p == '\r') n += 2;
-        else n += 1;
-    }
-    char *out = (char *)malloc(n + 1);
-    if (!out) die_alloc();
-    char *w = out;
-    for (const char *p = s; *p; p++) {
-        if (*p == '\\') {
-            *w++ = '\\';
-            *w++ = '\\';
-        } else if (*p == '"') {
-            *w++ = '\\';
-            *w++ = '"';
-        } else if (*p == '\n') {
-            *w++ = '\\';
-            *w++ = 'n';
-        } else if (*p == '\t') {
-            *w++ = '\\';
-            *w++ = 't';
-        } else if (*p == '\r') {
-            *w++ = '\\';
-            *w++ = 'r';
-        } else {
-            *w++ = *p;
-        }
-    }
-    *w = '\0';
-    return out;
-}
-
-/*
- * O que o método faz: Associa uma label (.data) para uma string, reaproveitando se já existir.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Otimização básica de tabelas de constantes.
-
- */
-static char *intern_string(CodegenCtx *cg, const char *text) {
-    for (CGString *it = cg->strings; it; it = it->next) {
-        if (strcmp(it->text, text) == 0) return it->label;
-    }
-    CGString *s = (CGString *)calloc(1, sizeof(CGString));
-    if (!s) die_alloc();
-    s->text = xstrdup(text);
-    s->label = new_label(cg, "str");
-    s->next = cg->strings;
-    cg->strings = s;
-    cg->string_count++;
-    return s->label;
-}
-
-static void collect_strings_stmt(CodegenCtx *cg, Stmt *s);
-
-/*
- * O que o método faz: Visita a AST previamente procurando literais de string em blocos.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Preparo da seção .data no MIPS.
-
- */
-static void collect_strings_block(CodegenCtx *cg, Block *b) {
-    if (!b) return;
-    for (Stmt *s = b->commands; s; s = s->next) collect_strings_stmt(cg, s);
-}
-
-/*
- * O que o método faz: Recurso auxiliar recursivo para achar strings dentro de comandos aninhados.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Varredura de strings na AST.
-
- */
-static void collect_strings_stmt(CodegenCtx *cg, Stmt *s) {
-    if (!s) return;
-    if (s->kind == ST_WRITE_STR) {
-        s->as.write_str.label = intern_string(cg, s->as.write_str.text);
-    } else if (s->kind == ST_IF) {
-        collect_strings_stmt(cg, s->as.if_stmt.then_branch);
-        if (s->as.if_stmt.else_branch) collect_strings_stmt(cg, s->as.if_stmt.else_branch);
-    } else if (s->kind == ST_WHILE) {
-        collect_strings_stmt(cg, s->as.while_stmt.body);
-    } else if (s->kind == ST_BLOCK) {
-        collect_strings_block(cg, s->as.block);
-    }
-}
-
-static void emit_expr(CodegenCtx *cg, Expr *e);
-static void emit_stmt(CodegenCtx *cg, Stmt *s);
-
-/*
- * O que o método faz: Cria um frame de variáveis locais empurrando o $sp.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Cálculo de offsets no MIPS para variáveis e alocação dinâmica.
-
- */
-static void cg_push_scope(CodegenCtx *cg, Block *b) {
-    CGScope *sc = (CGScope *)calloc(1, sizeof(CGScope));
-    if (!sc) die_alloc();
-    sc->prev = cg->top;
-    cg->top = sc;
-
-    int local = 0;
-    for (Decl *d = b->decls; d; d = d->next) {
-        local += cg_type_size(d->type);
-        CGSym *sym = (CGSym *)calloc(1, sizeof(CGSym));
-        if (!sym) die_alloc();
-        sym->name = d->name;
-        sym->type = d->type;
-        sym->size = cg_type_size(d->type);
-        sym->offset = -(cg->depth + local);
-        sym->next = sc->symbols;
-        sc->symbols = sym;
-    }
-
-    sc->alloc_size = local;
-    if (local > 0) {
-        fprintf(cg->out, "  addiu $sp, $sp, -%d\n", local);
-        cg->depth += local;
-    }
-}
-
-/*
- * O que o método faz: Recua o $sp destruindo o escopo na máquina alvo.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Garbage collection de stack frame e shadowing.
-
- */
-static void cg_pop_scope(CodegenCtx *cg) {
-    CGScope *sc = cg->top;
-    if (!sc) return;
-    if (sc->alloc_size > 0) {
-        fprintf(cg->out, "  addiu $sp, $sp, %d\n", sc->alloc_size);
-        cg->depth -= sc->alloc_size;
-    }
-    cg->top = sc->prev;
-    while (sc->symbols) {
-        CGSym *n = sc->symbols->next;
-        free(sc->symbols);
-        sc->symbols = n;
-    }
-    free(sc);
-}
-
-/*
- * O que o método faz: Emite o bloco de código controlando os pushes e pops ao redor.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Emissão de bloco sequencial.
-
- */
-static void emit_block(CodegenCtx *cg, Block *b) {
-    if (!b) return;
-    cg_push_scope(cg, b);
-    for (Stmt *s = b->commands; s; s = s->next) emit_stmt(cg, s);
-    cg_pop_scope(cg);
-}
-
-/*
- * O que o método faz: Traduz expressões aritméticas para comandos MIPS, guardando tudo no topo da pilha temporária para operações de 2 endereços.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: A geração de código é para arquitetura MIPS baseada em pilha ($sp).
-
- */
-static void emit_expr(CodegenCtx *cg, Expr *e) {
-    if (!e) return;
-    switch (e->kind) {
-        case EX_INT:
-            fprintf(cg->out, "  li $v0, %d\n", e->as.int_value);
-            return;
-        case EX_CHAR:
-            fprintf(cg->out, "  li $v0, %d\n", e->as.char_value);
-            return;
-        case EX_VAR: {
-            CGSym *sym = cg_lookup(cg, e->as.name);
-            if (sym->type == TYPE_INT) fprintf(cg->out, "  lw $v0, %d($fp)\n", sym->offset);
-            /* 'car' usa lbu para evitar extensão de sinal indevida. */
-            else fprintf(cg->out, "  lbu $v0, %d($fp)\n", sym->offset);
-            return;
-        }
-        case EX_ASSIGN: {
-            CGSym *sym = cg_lookup(cg, e->as.assign.name);
-            emit_expr(cg, e->as.assign.value);
-            if (sym->type == TYPE_INT) fprintf(cg->out, "  sw $v0, %d($fp)\n", sym->offset);
-            else fprintf(cg->out, "  sb $v0, %d($fp)\n", sym->offset);
-            return;
-        }
-        case EX_UNARY:
-            emit_expr(cg, e->as.un.expr);
-            if (e->as.un.op == OP_NEG) fprintf(cg->out, "  subu $v0, $zero, $v0\n");
-            else fprintf(cg->out, "  seq $v0, $v0, $zero\n");
-            return;
-        case EX_BINARY:
-            emit_expr(cg, e->as.bin.left);
-            fprintf(cg->out, "  addiu $sp, $sp, -4\n");
-            fprintf(cg->out, "  sw $v0, 0($sp)\n");
-            emit_expr(cg, e->as.bin.right);
-            fprintf(cg->out, "  move $t1, $v0\n");
-            fprintf(cg->out, "  lw $t0, 0($sp)\n");
-            fprintf(cg->out, "  addiu $sp, $sp, 4\n");
-            switch (e->as.bin.op) {
-                case OP_ADD: fprintf(cg->out, "  addu $v0, $t0, $t1\n"); break;
-                case OP_SUB: fprintf(cg->out, "  subu $v0, $t0, $t1\n"); break;
-                case OP_MUL: fprintf(cg->out, "  mul $v0, $t0, $t1\n"); break;
-                case OP_DIV:
-                    fprintf(cg->out, "  div $t0, $t1\n");
-                    fprintf(cg->out, "  mflo $v0\n");
-                    break;
-                case OP_LT: fprintf(cg->out, "  slt $v0, $t0, $t1\n"); break;
-                case OP_GT: fprintf(cg->out, "  slt $v0, $t1, $t0\n"); break;
-                case OP_GE: fprintf(cg->out, "  slt $v0, $t0, $t1\n  xori $v0, $v0, 1\n"); break;
-                case OP_LE: fprintf(cg->out, "  slt $v0, $t1, $t0\n  xori $v0, $v0, 1\n"); break;
-                case OP_EQ: fprintf(cg->out, "  seq $v0, $t0, $t1\n"); break;
-                case OP_NE: fprintf(cg->out, "  sne $v0, $t0, $t1\n"); break;
-                case OP_AND:
-                    fprintf(cg->out, "  sne $t0, $t0, $zero\n");
-                    fprintf(cg->out, "  sne $t1, $t1, $zero\n");
-                    fprintf(cg->out, "  and $v0, $t0, $t1\n");
-                    break;
-                case OP_OR:
-                    fprintf(cg->out, "  sne $t0, $t0, $zero\n");
-                    fprintf(cg->out, "  sne $t1, $t1, $zero\n");
-                    fprintf(cg->out, "  or $v0, $t0, $t1\n");
-                    break;
-                default:
-                    break;
-            }
-            return;
-    }
-}
-
-/*
- * O que o método faz: Emite a lógica imperativa do MIPS (branches, IO Syscalls).
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Transformar while e if em jumps (beq e j).
-
- */
-static void emit_stmt(CodegenCtx *cg, Stmt *s) {
-    if (!s) return;
-    switch (s->kind) {
-        case ST_EMPTY:
-            return;
-        case ST_EXPR:
-            emit_expr(cg, s->as.expr);
-            return;
-        case ST_READ: {
-            CGSym *sym = cg_lookup(cg, s->as.name);
-            if (sym->type == TYPE_INT) {
-                fprintf(cg->out, "  li $v0, 5\n  syscall\n");
-                fprintf(cg->out, "  sw $v0, %d($fp)\n", sym->offset);
-            } else {
-                fprintf(cg->out, "  li $v0, 12\n  syscall\n");
-                fprintf(cg->out, "  sb $v0, %d($fp)\n", sym->offset);
-            }
-            return;
-        }
-        case ST_WRITE_EXPR:
-            emit_expr(cg, s->as.expr);
-            if (s->as.expr->inferred_type == TYPE_INT) {
-                fprintf(cg->out, "  move $a0, $v0\n  li $v0, 1\n  syscall\n");
-            } else {
-                fprintf(cg->out, "  move $a0, $v0\n  li $v0, 11\n  syscall\n");
-            }
-            return;
-        case ST_WRITE_STR:
-            fprintf(cg->out, "  la $a0, %s\n  li $v0, 4\n  syscall\n", s->as.write_str.label);
-            return;
-        case ST_NEWLINE:
-            fprintf(cg->out, "  li $a0, 10\n  li $v0, 11\n  syscall\n");
-            return;
-        case ST_IF: {
-            char *l_else = new_label(cg, "else");
-            char *l_end = new_label(cg, "endif");
-            emit_expr(cg, s->as.if_stmt.cond);
-            if (s->as.if_stmt.else_branch) {
-                fprintf(cg->out, "  beq $v0, $zero, %s\n", l_else);
-                emit_stmt(cg, s->as.if_stmt.then_branch);
-                fprintf(cg->out, "  j %s\n", l_end);
-                fprintf(cg->out, "%s:\n", l_else);
-                emit_stmt(cg, s->as.if_stmt.else_branch);
-                fprintf(cg->out, "%s:\n", l_end);
-            } else {
-                fprintf(cg->out, "  beq $v0, $zero, %s\n", l_end);
-                emit_stmt(cg, s->as.if_stmt.then_branch);
-                fprintf(cg->out, "%s:\n", l_end);
-            }
-            free(l_else);
-            free(l_end);
-            return;
-        }
-        case ST_WHILE: {
-            char *l_start = new_label(cg, "while_start");
-            char *l_end = new_label(cg, "while_end");
-            fprintf(cg->out, "%s:\n", l_start);
-            emit_expr(cg, s->as.while_stmt.cond);
-            fprintf(cg->out, "  beq $v0, $zero, %s\n", l_end);
-            emit_stmt(cg, s->as.while_stmt.body);
-            fprintf(cg->out, "  j %s\n", l_start);
-            fprintf(cg->out, "%s:\n", l_end);
-            free(l_start);
-            free(l_end);
-            return;
-        }
+static void collect_strings_stmt(Gen *g, Stmt *st) {
+    for (; st; st = st->next) {
+        switch (st->kind) {
+        case ST_WRITE_STR: add_string(g, st); break;
+        case ST_IF:
+            collect_strings_stmt(g, st->as.if_s.then_branch);
+            collect_strings_stmt(g, st->as.if_s.else_branch);
+            break;
+        case ST_WHILE:
+            collect_strings_stmt(g, st->as.while_s.body);
+            break;
         case ST_BLOCK:
-            emit_block(cg, s->as.block);
-            return;
+            if (st->as.block) collect_strings_stmt(g, st->as.block->commands);
+            break;
+        default: break;
+        }
     }
 }
 
-/*
- * O que o método faz: Setup inicial do MIPS (bootstrapping da .data e main) gerindo o fp original.
- * Papel no Pipeline: Gerador de Código MIPS.
- * Regra da G-V1: Ponto de entrada do programa e emissão do assembler final.
+static void collect_strings_program(Gen *g, Program *prog) {
+    for (Func *f = prog->functions; f; f = f->next)
+        if (f->body) collect_strings_stmt(g, f->body->commands);
+    if (prog->main_block) collect_strings_stmt(g, prog->main_block->commands);
+}
 
- */
-void generate_code(Program *prog, FILE *out) {
-    CodegenCtx cg;
-    memset(&cg, 0, sizeof(cg));
-    cg.out = out;
+/* imprime o texto da string ja escapado para .asciiz */
+static void emit_escaped_string(Gen *g, const char *s) {
+    fputc('"', g->out);
+    for (const char *p = s; *p; p++) {
+        if (*p == '"' || *p == '\\') fputc('\\', g->out);
+        fputc(*p, g->out);
+    }
+    fputc('"', g->out);
+}
 
-    collect_strings_block(&cg, prog->block);
+/* ===========================================================================
+ *  Acesso a variaveis -- traduz (categoria, posicao) em enderecos MIPS.
+ *
+ *    GLOBAL pos p : endereco = $s1 - 4*(p-1)
+ *    PARAM  idx i : endereco = $fp + 4*i     (escalar) | guarda o ENDERECO
+ *                                              base se for vetor (passado por
+ *                                              referencia)
+ *    LOCAL  pos p : endereco = $fp - 4*p
+ * =========================================================================*/
 
-    fprintf(out, ".data\n");
-    for (CGString *it = cg.strings; it; it = it->next) {
-        char *esc = mips_escape_string(it->text);
-        fprintf(out, "%s: .asciiz \"%s\"\n", it->label, esc);
-        free(esc);
+/* carrega o valor de uma variavel ESCALAR no registrador reg */
+static void emit_scalar_load(Gen *g, VarRef *r, const char *reg) {
+    if (r->category == CAT_GLOBAL)
+        emit(g, "    lw %s, %d($s1)", reg, -4 * (r->position - 1));
+    else if (r->category == CAT_PARAM)
+        emit(g, "    lw %s, %d($fp)", reg, 4 * r->position);
+    else /* CAT_LOCAL */
+        emit(g, "    lw %s, %d($fp)", reg, -4 * r->position);
+}
+
+/* armazena o valor de reg em uma variavel ESCALAR */
+static void emit_scalar_store(Gen *g, VarRef *r, const char *reg) {
+    if (r->category == CAT_GLOBAL)
+        emit(g, "    sw %s, %d($s1)", reg, -4 * (r->position - 1));
+    else if (r->category == CAT_PARAM)
+        emit(g, "    sw %s, %d($fp)", reg, 4 * r->position);
+    else /* CAT_LOCAL */
+        emit(g, "    sw %s, %d($fp)", reg, -4 * r->position);
+}
+
+/* Calcula no registrador $t0 o ENDERECO do elemento vetor[indice].
+ * Estrategia: endereco = base0 - 4*indice, onde base0 e o endereco do
+ * elemento de indice 0. (A pilha cresce para baixo, entao indices maiores
+ * ficam em enderecos menores -- por isso a subtracao.) */
+static void emit_array_elem_addr(Gen *g, VarRef *r, Expr *index) {
+    cgen_expr(g, index);              /* $s0 = indice                        */
+    emit(g, "    sll $s0, $s0, 2");   /* $s0 = 4*indice                      */
+    if (r->category == CAT_GLOBAL)
+        emit(g, "    addiu $t0, $s1, %d", -4 * (r->position - 1)); /* base0  */
+    else if (r->category == CAT_LOCAL)
+        emit(g, "    addiu $t0, $fp, %d", -4 * r->position);       /* base0  */
+    else /* CAT_PARAM: o parametro guarda o endereco base do vetor */
+        emit(g, "    lw $t0, %d($fp)", 4 * r->position);
+    emit(g, "    sub $t0, $t0, $s0"); /* $t0 = endereco do elemento          */
+}
+
+/* Empilha um argumento de chamada de funcao. Se for um vetor (passagem por
+ * referencia), empilha o ENDERECO base; caso contrario, empilha o VALOR. */
+static void cgen_argument(Gen *g, Expr *arg) {
+    if (arg->kind == EX_VAR && arg->as.var.ref.is_array) {
+        VarRef *r = &arg->as.var.ref;
+        if (r->category == CAT_GLOBAL)
+            emit(g, "    addiu $s0, $s1, %d", -4 * (r->position - 1));
+        else if (r->category == CAT_LOCAL)
+            emit(g, "    addiu $s0, $fp, %d", -4 * r->position);
+        else /* PARAM: repassa o endereco base recebido */
+            emit(g, "    lw $s0, %d($fp)", 4 * r->position);
+    } else {
+        cgen_expr(g, arg);
+    }
+    /* empilha $s0 */
+    emit(g, "    sw $s0, 0($sp)");
+    emit(g, "    addiu $sp, $sp, -4");
+}
+
+/* empilha os argumentos em ORDEM INVERSA (arg_n primeiro, arg_1 por ultimo).
+ * Recursao: empilha a cauda da lista antes do elemento atual. */
+static void cgen_args_reverse(Gen *g, Arg *a) {
+    if (!a) return;
+    cgen_args_reverse(g, a->next);
+    cgen_argument(g, a->expr);
+}
+
+/* ===========================================================================
+ *  Geracao de codigo para EXPRESSOES. Resultado sempre em $s0; pilha preservada.
+ * =========================================================================*/
+static void cgen_expr(Gen *g, Expr *e) {
+    switch (e->kind) {
+
+    case EX_INT:
+        emit(g, "    li $s0, %d", e->as.int_value);
+        break;
+
+    case EX_CHAR:
+        emit(g, "    li $s0, %d", e->as.char_value);
+        break;
+
+    case EX_VAR:
+        /* na geracao de codigo so chegam aqui usos escalares (a semantica ja
+         * recusou usar o nome de um vetor sem indice em expressao). */
+        emit_scalar_load(g, &e->as.var.ref, "$s0");
+        break;
+
+    case EX_ARRAY:
+        emit_array_elem_addr(g, &e->as.arr.ref, e->as.arr.index);
+        emit(g, "    lw $s0, 0($t0)");
+        break;
+
+    case EX_ASSIGN:
+        if (e->as.assign.index == NULL) {
+            /* atribuicao a escalar: calcula valor e guarda */
+            cgen_expr(g, e->as.assign.value);
+            emit_scalar_store(g, &e->as.assign.ref, "$s0");
+        } else {
+            /* atribuicao a elemento de vetor: empilha valor, calcula endereco,
+             * desempilha valor e grava. */
+            cgen_expr(g, e->as.assign.value);
+            emit(g, "    sw $s0, 0($sp)");
+            emit(g, "    addiu $sp, $sp, -4");
+            emit_array_elem_addr(g, &e->as.assign.ref, e->as.assign.index);
+            emit(g, "    lw $s0, 4($sp)");
+            emit(g, "    addiu $sp, $sp, 4");
+            emit(g, "    sw $s0, 0($t0)");
+        }
+        break;
+
+    case EX_CALL: {
+        /* SEQUENCIA DE CHAMADA (lado do chamador):
+         *   1. empilha o $fp do chamador
+         *   2. empilha os argumentos em ordem inversa
+         *   3. jal <funcao>
+         * O retorno (lado do chamado) restaura $sp e $fp; resultado em $s0. */
+        emit(g, "    sw $fp, 0($sp)");          /* empilha $fp do chamador    */
+        emit(g, "    addiu $sp, $sp, -4");
+        cgen_args_reverse(g, e->as.call.args);  /* empilha argumentos         */
+        emit(g, "    jal %s", e->as.call.name); /* desvia para a funcao       */
+        break;
     }
 
-    fprintf(out, ".text\n");
-    fprintf(out, ".globl main\n");
-    fprintf(out, "main:\n");
-    fprintf(out, "  move $fp, $sp\n");
+    case EX_UNARY:
+        cgen_expr(g, e->as.un.operand);
+        if (e->as.un.op == OP_NEG)
+            emit(g, "    sub $s0, $zero, $s0");     /* negacao aritmetica     */
+        else /* OP_NOT */
+            emit(g, "    seq $s0, $s0, $zero");     /* 1 se for 0, senao 0    */
+        break;
 
-    emit_block(&cg, prog->block);
+    case EX_BINARY: {
+        /* esquema da maquina de pilha (vide topo do arquivo) */
+        cgen_expr(g, e->as.bin.left);
+        emit(g, "    sw $s0, 0($sp)");          /* empilha e1                 */
+        emit(g, "    addiu $sp, $sp, -4");
+        cgen_expr(g, e->as.bin.right);
+        emit(g, "    lw $t1, 4($sp)");          /* desempilha e1 em $t1       */
+        emit(g, "    addiu $sp, $sp, 4");
+        switch (e->as.bin.op) {
+        case OP_ADD: emit(g, "    add $s0, $t1, $s0"); break;
+        case OP_SUB: emit(g, "    sub $s0, $t1, $s0"); break;
+        case OP_MUL: emit(g, "    mul $s0, $t1, $s0"); break;
+        case OP_DIV: emit(g, "    div $s0, $t1, $s0"); break;
+        case OP_LT:  emit(g, "    slt $s0, $t1, $s0"); break;
+        case OP_GT:  emit(g, "    sgt $s0, $t1, $s0"); break;
+        case OP_LE:  emit(g, "    sle $s0, $t1, $s0"); break;
+        case OP_GE:  emit(g, "    sge $s0, $t1, $s0"); break;
+        case OP_EQ:  emit(g, "    seq $s0, $t1, $s0"); break;
+        case OP_NE:  emit(g, "    sne $s0, $t1, $s0"); break;
+        case OP_AND: /* normaliza para 0/1 e faz E bit a bit */
+            emit(g, "    sne $t1, $t1, $zero");
+            emit(g, "    sne $s0, $s0, $zero");
+            emit(g, "    and $s0, $t1, $s0");
+            break;
+        case OP_OR:
+            emit(g, "    sne $t1, $t1, $zero");
+            emit(g, "    sne $s0, $s0, $zero");
+            emit(g, "    or $s0, $t1, $s0");
+            break;
+        default: break;
+        }
+        break;
+    }
+    }
+}
 
-    fprintf(out, "  li $v0, 10\n");
-    fprintf(out, "  syscall\n");
+/* ===========================================================================
+ *  Geracao de codigo para COMANDOS.
+ * =========================================================================*/
+static void cgen_stmt(Gen *g, Stmt *st) {
+    for (; st; st = st->next) {
+        switch (st->kind) {
+
+        case ST_EMPTY:
+            break;
+
+        case ST_EXPR:
+            cgen_expr(g, st->as.expr);   /* resultado descartado */
+            break;
+
+        case ST_RETURN:
+            if (st->as.expr) cgen_expr(g, st->as.expr); /* valor em $s0 */
+            emit(g, "    b %s", g->cur_epilogue);        /* vai ao epilogo */
+            break;
+
+        case ST_READ: {
+            int is_car = (st->as.read.ref.type == TYPE_CAR);
+            emit(g, "    li $v0, %d", is_car ? 12 : 5);  /* read_char/read_int*/
+            emit(g, "    syscall");
+            if (st->as.read.index == NULL) {
+                emit_scalar_store(g, &st->as.read.ref, "$v0");
+            } else {
+                emit_array_elem_addr(g, &st->as.read.ref, st->as.read.index);
+                emit(g, "    sw $v0, 0($t0)");
+            }
+            break;
+        }
+
+        case ST_WRITE_EXPR:
+            cgen_expr(g, st->as.expr);
+            emit(g, "    move $a0, $s0");
+            if (st->as.expr->inferred_type == TYPE_CAR)
+                emit(g, "    li $v0, 11");   /* print_char */
+            else
+                emit(g, "    li $v0, 1");    /* print_int  */
+            emit(g, "    syscall");
+            break;
+
+        case ST_WRITE_STR:
+            emit(g, "    la $a0, %s", st->as.wstr.label);
+            emit(g, "    li $v0, 4");         /* print_string */
+            emit(g, "    syscall");
+            break;
+
+        case ST_NEWLINE:
+            emit(g, "    li $a0, 10");        /* codigo ASCII de '\n' */
+            emit(g, "    li $v0, 11");
+            emit(g, "    syscall");
+            break;
+
+        case ST_IF: {
+            int id = new_label(g);
+            cgen_expr(g, st->as.if_s.cond);
+            if (st->as.if_s.else_branch) {
+                emit(g, "    beq $s0, $zero, else_%d", id);
+                cgen_stmt(g, st->as.if_s.then_branch);
+                emit(g, "    b endif_%d", id);
+                emit(g, "else_%d:", id);
+                cgen_stmt(g, st->as.if_s.else_branch);
+                emit(g, "endif_%d:", id);
+            } else {
+                emit(g, "    beq $s0, $zero, endif_%d", id);
+                cgen_stmt(g, st->as.if_s.then_branch);
+                emit(g, "endif_%d:", id);
+            }
+            break;
+        }
+
+        case ST_WHILE: {
+            int id = new_label(g);
+            emit(g, "while_%d:", id);
+            cgen_expr(g, st->as.while_s.cond);
+            emit(g, "    beq $s0, $zero, endwhile_%d", id);
+            cgen_stmt(g, st->as.while_s.body);
+            emit(g, "    b while_%d", id);
+            emit(g, "endwhile_%d:", id);
+            break;
+        }
+
+        case ST_BLOCK:
+            cgen_block(g, st->as.block, 1);  /* bloco aninhado aloca locais */
+            break;
+        }
+    }
+}
+
+/* soma o numero de "slots" (palavras de 4 bytes) ocupados pelas declaracoes */
+static int decls_size(Decl *d) {
+    int total = 0;
+    for (; d; d = d->next) total += d->is_array ? d->array_size : 1;
+    return total;
+}
+
+/* Gera codigo de um bloco. Se 'allocate_locals' for verdadeiro (bloco
+ * aninhado), reserva espaco na pilha para as variaveis locais na entrada e
+ * libera na saida. Para o bloco externo de uma funcao o prologo ja reservou,
+ * entao passamos 0. */
+static void cgen_block(Gen *g, Block *b, int allocate_locals) {
+    if (!b) return;
+    int k = decls_size(b->decls);
+    if (allocate_locals && k > 0)
+        emit(g, "    addiu $sp, $sp, %d", -4 * k);   /* reserva locais */
+    cgen_stmt(g, b->commands);
+    if (allocate_locals && k > 0)
+        emit(g, "    addiu $sp, $sp, %d", 4 * k);     /* libera locais  */
+}
+
+/* ===========================================================================
+ *  Geracao de uma FUNCAO completa (prologo, corpo, epilogo).
+ *
+ *  Registro de Ativacao (de cima/enderecos maiores para baixo):
+ *      $fp do chamador
+ *      argumento n ... argumento 1
+ *      $ra                <- $fp aponta aqui
+ *      local 1 ... local m
+ *                         <- $sp
+ * =========================================================================*/
+static void cgen_function(Gen *g, Func *f) {
+    char epilogue[128];
+    snprintf(epilogue, sizeof epilogue, "%s__epi", f->name);
+    g->cur_epilogue = epilogue;
+    g->cur_param_count = f->param_count;
+
+    int m = decls_size(f->body ? f->body->decls : NULL); /* locais externos */
+
+    emit(g, "%s:", f->name);
+    /* --- PROLOGO (sequencia de chamada do lado do chamado) --- */
+    emit(g, "    move $fp, $sp");          /* $fp marca o inicio do frame    */
+    emit(g, "    sw $ra, 0($sp)");         /* salva o endereco de retorno    */
+    emit(g, "    addiu $sp, $sp, -4");
+    if (m > 0)
+        emit(g, "    addiu $sp, $sp, %d", -4 * m);  /* aloca locais externos */
+
+    /* --- CORPO --- (locais externos ja alocados: passamos 0) */
+    cgen_block(g, f->body, 0);
+
+    /* --- EPILOGO (retorno de funcao) --- */
+    emit(g, "%s:", epilogue);
+    emit(g, "    lw $ra, 0($fp)");                  /* restaura $ra           */
+    emit(g, "    move $sp, $fp");                   /* libera locais          */
+    emit(g, "    addiu $sp, $sp, %d", 4 * (f->param_count + 1)); /* tira args+$fp slot */
+    emit(g, "    lw $fp, 0($sp)");                  /* restaura $fp do chamador*/
+    emit(g, "    jr $ra");                          /* volta ao chamador      */
+    emit(g, "");
+}
+
+/* ===========================================================================
+ *  Geracao do programa PRINCIPAL (ponto de entrada 'main').
+ * =========================================================================*/
+static void cgen_principal(Gen *g, Program *prog) {
+    int gsize = decls_size(prog->globals);
+    int lp    = decls_size(prog->main_block ? prog->main_block->decls : NULL);
+
+    emit(g, "main:");
+    /* base das globais: $s1 = $sp atual; depois reservamos o espaco delas */
+    emit(g, "    move $s1, $sp");
+    if (gsize > 0)
+        emit(g, "    addiu $sp, $sp, %d", -4 * gsize);
+    /* frame do principal: tratamos como funcao sem parametros e sem $ra.
+     * Reservamos 1 slot ($fp+0, no lugar do $ra) para manter a MESMA formula
+     * de acesso a locais das funcoes ($fp - 4*pos). */
+    emit(g, "    move $fp, $sp");
+    emit(g, "    addiu $sp, $sp, -4");
+    if (lp > 0)
+        emit(g, "    addiu $sp, $sp, %d", -4 * lp);
+
+    g->cur_epilogue = "main__fim";
+    g->cur_param_count = 0;
+
+    cgen_block(g, prog->main_block, 0);  /* locais ja alocados acima */
+
+    emit(g, "main__fim:");
+    emit(g, "    li $v0, 10");           /* syscall 10 = exit */
+    emit(g, "    syscall");
+    emit(g, "");
+}
+
+/* ===========================================================================
+ *  Ponto de entrada do back-end.
+ * =========================================================================*/
+void generate_code(Program *prog, FILE *out) {
+    Gen g;
+    memset(&g, 0, sizeof g);
+    g.out = out;
+
+    /* 1) descobre todas as strings literais e atribui rotulos */
+    collect_strings_program(&g, prog);
+
+    /* 2) segmento de dados (.data): as strings do programa */
+    emit(&g, "    .data");
+    for (int i = 0; i < g.str_count; i++) {
+        fprintf(out, "%s: .asciiz ", g.str_label[i]);
+        emit_escaped_string(&g, g.str_text[i]);
+        fputc('\n', out);
+    }
+
+    /* 3) segmento de codigo (.text) */
+    emit(&g, "    .text");
+    emit(&g, "    .globl main");
+    cgen_principal(&g, prog);            /* 'main' executa o principal */
+    for (Func *f = prog->functions; f; f = f->next)
+        cgen_function(&g, f);            /* depois, o codigo das funcoes */
+
+    free(g.str_text);
+    free(g.str_label);
 }

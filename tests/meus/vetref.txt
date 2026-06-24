@@ -1,0 +1,24 @@
+funcao [
+	preenche(v[]:int, n:int):int
+		[ i:int; ]
+		{
+			i=0;
+			enquanto (i<n) {
+				v[i] = i*i;
+				i=i+1;
+			}
+			retorne 0;
+		}
+]
+principal
+	[ vet[5]:int; i:int; ]
+	{
+		preenche(vet, 5);
+		i=0;
+		enquanto (i<5) {
+			escreva vet[i];
+			escreva " ";
+			i=i+1;
+		}
+		novalinha;
+	}

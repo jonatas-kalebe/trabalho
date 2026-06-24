@@ -1,0 +1,21 @@
+# Arquivos GERADOS por Flex/Bison (sao recriados pelo build)
+src/lex.yy.c
+src/parser.tab.c
+src/parser.tab.h
+
+# Objetos e executaveis
+*.o
+*.obj
+build/
+compilador
+compilador.exe
+
+# Saidas de teste geradas localmente
+tests/meus/*.asm
+
+# Toolchain baixado e simulador auxiliar (nao versionar binarios grandes)
+tools/winflexbison/
+
+# IDE
+.idea/
+.vscode/
