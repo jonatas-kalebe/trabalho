@@ -1,0 +1,19 @@
+funcao[
+		fatorial(n:int): int {
+			se (n==0)
+			entao
+				retorne 1;
+			senao
+				retorne n* fatorial(n-1);
+			fimse
+		}
+]
+
+principal {
+    escreva "fatorial(5) = ";
+    escreva fatorial(5);
+       		novalinha;
+    escreva "fatorial(10) = ";
+    escreva fatorial(10);
+	novalinha;
+}
