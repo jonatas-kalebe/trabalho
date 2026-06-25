@@ -13,8 +13,11 @@ texto-fonte → [Léxico/Flex] → [Sintático/Bison] → AST
             → [Geração de Código] → MIPS
 ```
 
-> 📚 Para entender **os conceitos** (pilha, registros de ativação, escopos,
-> LALR, etc.) e se preparar para perguntas, leia **[GUIA_DE_ESTUDO.md](GUIA_DE_ESTUDO.md)**.
+> 📚 Para entender **o que foi adicionado na Parte 2** (vetores, funções,
+> variáveis globais e a troca de `{}` por `[]`), leia
+> **[O_QUE_FOI_ADICIONADO.md](O_QUE_FOI_ADICIONADO.md)**.
+> Para os **conceitos gerais** (pilha, registros de ativação, escopos, LALR),
+> veja **[GUIA_DE_ESTUDO.md](GUIA_DE_ESTUDO.md)**.
 > Para a análise de **cada arquivo de teste**, veja **[TESTES.md](TESTES.md)**.
 
 ---
