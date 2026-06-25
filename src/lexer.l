@@ -1,21 +1,3 @@
-/* ============================================================================
- *  lexer.l  --  Analisador LEXICO (scanner) da linguagem Cafezinho, em Flex.
- *
- *  CONCEITO (1a fase do compilador):
- *  ---------------------------------
- *  O analisador lexico le o texto-fonte caractere a caractere e o agrupa em
- *  TOKENS (as "palavras" da linguagem): palavras-reservadas, identificadores,
- *  numeros, operadores, etc. Ele entrega esses tokens, um a um, ao analisador
- *  sintatico (parser.y). Tambem descarta espacos e comentarios.
- *
- *  O Flex transforma as expressoes regulares abaixo em um AUTOMATO FINITO que
- *  reconhece cada padrao usando a regra do "maior casamento" (maximal munch).
- *
- *  >>> COMO ACHAR AS NOVIDADES DA PARTE 2 <<<
- *  Procure pela etiqueta  [PARTE 2 - NOVO]  neste e nos outros arquivos. Ela
- *  marca tudo o que foi acrescentado em relacao a linguagem-base (G-V1):
- *  vetores, funcoes, variaveis globais e os colchetes "[" "]" das declaracoes.
- * ==========================================================================*/
 %option noyywrap
 %option yylineno
 %option nounistd
@@ -27,10 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ast.h"
-#include "parser.tab.h"   /* nomes dos tokens (TOK_*), gerados pelo Bison    */
+#include "parser.tab.h"
 
-/* A cada token casado, registramos a linha em yylloc para o parser usar nas
- * mensagens de erro (rastreamento de localizacao). */
 #define YY_USER_ACTION  yylloc.first_line = yylloc.last_line = yylineno;
 
 void yyerror(const char *s);
@@ -38,23 +18,21 @@ void yyerror(const char *s);
 
 %%
 
- /* ---- Palavras reservadas ---------------------------------------------- */
-"global"    { return TOK_GLOBAL; }    /* [PARTE 2 - NOVO] secao de variaveis globais */
-"funcao"    { return TOK_FUNCAO; }    /* [PARTE 2 - NOVO] secao de funcoes            */
+"global"    { return TOK_GLOBAL; }
+"funcao"    { return TOK_FUNCAO; }
 "principal" { return TOK_PRINCIPAL; }
 "se"        { return TOK_SE; }
 "entao"     { return TOK_ENTAO; }
 "senao"     { return TOK_SENAO; }
 "fimse"     { return TOK_FIMSE; }
 "enquanto"  { return TOK_ENQUANTO; }
-"retorne"   { return TOK_RETORNE; }   /* [PARTE 2 - NOVO] retorno de funcao           */
+"retorne"   { return TOK_RETORNE; }
 "leia"      { return TOK_LEIA; }
 "escreva"   { return TOK_ESCREVA; }
 "novalinha" { return TOK_NOVALINHA; }
 "int"       { return TOK_INT; }
 "car"       { return TOK_CAR; }
 
- /* ---- Operadores (os de 2 caracteres vem ANTES dos de 1) --------------- */
 "||"        { return TOK_OU; }
 "&&"        { return TOK_E; }
 "=="        { return TOK_IGUAL; }
@@ -70,24 +48,21 @@ void yyerror(const char *s);
 "!"         { return TOK_BANG; }
 "="         { return TOK_ASSIGN; }
 
- /* ---- Delimitadores ---------------------------------------------------- */
 "{"         { return TOK_LBRACE; }
 "}"         { return TOK_RBRACE; }
 "("         { return TOK_LPAREN; }
 ")"         { return TOK_RPAREN; }
-"["         { return TOK_LBRACK; }    /* [PARTE 2 - NOVO] abre secao de declaracoes / indice de vetor */
-"]"         { return TOK_RBRACK; }    /* [PARTE 2 - NOVO] fecha secao de declaracoes / indice de vetor */
+"["         { return TOK_LBRACK; }
+"]"         { return TOK_RBRACK; }
 ":"         { return TOK_COLON; }
 ";"         { return TOK_SEMICOLON; }
 ","         { return TOK_COMMA; }
 
- /* ---- Constante inteira ------------------------------------------------ */
 [0-9]+      {
     yylval.ival = atoi(yytext);
     return TOK_INTCONST;
 }
 
- /* ---- Constante caractere: 'a' ou escapes como '\n' -------------------- */
 \'([^\'\\]|\\.)\' {
     if (yytext[1] == '\\') {
         switch (yytext[2]) {
@@ -105,28 +80,22 @@ void yyerror(const char *s);
     return TOK_CHARCONST;
 }
 
- /* ---- Cadeia de caracteres (string) numa unica linha ------------------- */
 \"[^\"\n]*\" {
-    /* copia sem as aspas */
     yylval.sval = xstrdup(yytext + 1);
     yylval.sval[strlen(yylval.sval) - 1] = '\0';
     return TOK_STRING;
 }
 
- /* ---- Identificador (variavel/funcao) ---------------------------------- */
 [a-zA-Z_][a-zA-Z0-9_]* {
     yylval.sval = xstrdup(yytext);
     return TOK_IDENT;
 }
 
- /* ---- Espacos e quebras de linha (ignorados) --------------------------- */
-[ \t\r]+    { /* ignora espacos em branco */ }
-\n          { /* yylineno e atualizado automaticamente pelo Flex */ }
+[ \t\r]+    { }
+\n          { }
 
- /* ---- Comentarios de bloco -------------------------------------------- */
-"/*"([^*]|(\*+[^*/]))*\*+"/"   { /* ignora comentario completo */ }
+"/*"([^*]|(\*+[^*/]))*\*+"/"   { }
 
- /* ---- Tratamento de erros lexicos ------------------------------------- */
 \"[^\"\n]*\n {
     printf("ERRO LEXICO (linha %d): cadeia de caracteres ocupa mais de uma linha\n", yylineno);
     exit(1);

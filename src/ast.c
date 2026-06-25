@@ -1,22 +1,11 @@
-/* ============================================================================
- *  ast.c  --  Implementacao dos construtores da AST.
- *
- *  Cada funcao aqui apenas: (1) aloca um no, (2) preenche os campos, (3)
- *  devolve o ponteiro. Sao "fabricas" de nos. Manter isso separado deixa o
- *  parser.y limpo: nas acoes do Bison escrevemos so 'new_expr_binary(...)'.
- * ==========================================================================*/
 #include "ast.h"
 #include <stdio.h>
 
-/* Aborta o programa quando malloc falha. Em um compilador real trataria
- * melhor, mas para fins didaticos basta avisar e sair. */
 void die_alloc(void) {
     fprintf(stderr, "ERRO INTERNO: memoria insuficiente\n");
     exit(1);
 }
 
-/* strdup nao faz parte do C ANSI estrito; implementamos a nossa para
- * copiar com seguranca os nomes que vem do buffer do Flex (yytext). */
 char *xstrdup(const char *s) {
     if (!s) return NULL;
     size_t n = strlen(s) + 1;
@@ -26,18 +15,15 @@ char *xstrdup(const char *s) {
     return p;
 }
 
-/* Helper interno: aloca um Expr ja com kind e linha preenchidos. */
 static Expr *alloc_expr(ExprKind kind, int line) {
     Expr *e = (Expr *)calloc(1, sizeof(Expr));
     if (!e) die_alloc();
     e->kind = kind;
     e->line = line;
-    e->inferred_type = TYPE_INT;   /* default; a semantica corrige           */
+    e->inferred_type = TYPE_INT;
     e->is_array_result = 0;
     return e;
 }
-
-/* ---- Expressoes -----------------------------------------------------------*/
 
 Expr *new_expr_int(int value, int line) {
     Expr *e = alloc_expr(EX_INT, line);
@@ -70,7 +56,7 @@ Expr *new_expr_call(char *name, Arg *args, int line) {
     Expr *e = alloc_expr(EX_CALL, line);
     e->as.call.name = name;
     e->as.call.args = args;
-    /* conta os argumentos uma unica vez aqui */
+
     int c = 0;
     for (Arg *a = args; a; a = a->next) c++;
     e->as.call.argc = c;
@@ -80,7 +66,7 @@ Expr *new_expr_call(char *name, Arg *args, int line) {
 Expr *new_expr_assign(char *name, Expr *index, Expr *value, int line) {
     Expr *e = alloc_expr(EX_ASSIGN, line);
     e->as.assign.name  = name;
-    e->as.assign.index = index;   /* NULL = escalar; != NULL = elemento vetor */
+    e->as.assign.index = index;
     e->as.assign.value = value;
     e->as.assign.ref.category = CAT_NONE;
     return e;
@@ -108,8 +94,6 @@ Arg *new_arg(Expr *expr) {
     a->next = NULL;
     return a;
 }
-
-/* ---- Declaracoes, parametros, blocos e funcoes ---------------------------*/
 
 Decl *new_decl(char *name, Type type, int is_array, int array_size, int line) {
     Decl *d = (Decl *)calloc(1, sizeof(Decl));
@@ -153,14 +137,12 @@ Func *new_func(char *name, Param *params, Type return_type, Block *body, int lin
     f->body = body;
     f->line = line;
     f->next = NULL;
-    /* conta os parametros */
+
     int c = 0;
     for (Param *p = params; p; p = p->next) c++;
     f->param_count = c;
     return f;
 }
-
-/* ---- Comandos -------------------------------------------------------------*/
 
 static Stmt *alloc_stmt(StmtKind kind, int line) {
     Stmt *s = (Stmt *)calloc(1, sizeof(Stmt));
@@ -204,7 +186,7 @@ Stmt *new_stmt_write_expr(Expr *expr, int line) {
 Stmt *new_stmt_write_str(char *text, int line) {
     Stmt *s = alloc_stmt(ST_WRITE_STR, line);
     s->as.wstr.text = text;
-    s->as.wstr.label = NULL;   /* rotulo .data atribuido na geracao de codigo */
+    s->as.wstr.label = NULL;
     return s;
 }
 

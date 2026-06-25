@@ -1,18 +1,3 @@
-/* ============================================================================
- *  parser.y  --  Analisador SINTATICO da linguagem Cafezinho, em Bison.
- *
- *  CONCEITO (2a fase do compilador):
- *  ---------------------------------
- *  O analisador sintatico recebe a sequencia de tokens do lexer e verifica se
- *  ela obedece a GRAMATICA da linguagem, ao mesmo tempo em que CONSTROI a AST.
- *  O Bison gera um parser LALR(1) (bottom-up, "shift-reduce"): ele empilha
- *  simbolos (shift) e, quando reconhece o lado direito de uma regra, reduz
- *  (reduce) executando a acao em C que monta o no correspondente da arvore.
- *
- *  A precedencia e a associatividade dos operadores (declaradas com %left /
- *  %right abaixo) resolvem as ambiguidades das expressoes SEM precisar inflar
- *  a gramatica com regras auxiliares.
- * ==========================================================================*/
 %{
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
@@ -24,12 +9,8 @@ extern int  yylex(void);
 extern int  yylineno;
 void yyerror(const char *s);
 
-/* O no raiz da AST, preenchido ao final da analise. */
 Program root_program;
 
-/* Estrutura auxiliar SO do parser: acumula os nomes de uma declaracao
- * multipla (ex.: "v1[5], v2[5], soma : int;") junto com info de vetor.
- * Depois, na regra DeclVar, cada item vira um Decl com o tipo informado. */
 typedef struct IdItem {
     char *name;
     int   is_array;
@@ -48,13 +29,13 @@ static IdItem *make_iditem(char *name, int is_array, int size) {
 }
 %}
 
-%locations   /* habilita rastreamento de linha (@1, @$) para mensagens de erro */
+%locations
 
 %union {
     int    ival;
     int    cval;
     char  *sval;
-    int    type;        /* Type (TYPE_INT / TYPE_CAR)                         */
+    int    type;
     Expr  *expr;
     Arg   *arg;
     Stmt  *stmt;
@@ -65,7 +46,6 @@ static IdItem *make_iditem(char *name, int is_array, int size) {
     struct IdItem *iditem;
 }
 
-/* ---- Tokens ------------------------------------------------------------- */
 %token TOK_GLOBAL TOK_FUNCAO TOK_PRINCIPAL
 %token TOK_SE TOK_ENTAO TOK_SENAO TOK_FIMSE TOK_ENQUANTO TOK_RETORNE
 %token TOK_LEIA TOK_ESCREVA TOK_NOVALINHA
@@ -80,7 +60,6 @@ static IdItem *make_iditem(char *name, int is_array, int size) {
 %token <sval> TOK_STRING
 %token <sval> TOK_IDENT
 
-/* ---- Tipos dos nao-terminais ------------------------------------------- */
 %type <decl>   Globais DeclVarList DeclVar
 %type <func>   Funcoes FuncList Funcao
 %type <param>  Params ParamList Param
@@ -91,7 +70,6 @@ static IdItem *make_iditem(char *name, int is_array, int size) {
 %type <iditem> IdentList IdentItem
 %type <type>   Tipo
 
-/* ---- Precedencia (da MENOR para a MAIOR) ------------------------------- */
 %right TOK_ASSIGN
 %left  TOK_OU
 %left  TOK_E
@@ -101,21 +79,8 @@ static IdItem *make_iditem(char *name, int is_array, int size) {
 %left  TOK_STAR TOK_SLASH
 %right TOK_BANG UMINUS
 
-/* Observacao: esta gramatica e LALR(1) SEM conflitos. Apos um IDENT, a
- * decisao entre variavel / indexacao '[' / chamada '(' / atribuicao '=' e
- * tomada apenas pelo proximo token (lookahead), cujos conjuntos sao
- * disjuntos -- por isso nao ha ambiguidade. */
-
 %%
 
-/* ===========================================================================
- *  Estrutura geral do programa:  [global] [funcao] principal
- *
- *  [PARTE 2 - NOVO] Na linguagem-base (G-V1) o programa era SO o 'principal'.
- *  Agora ele tem duas secoes OPCIONAIS antes dele: 'global' (variaveis globais)
- *  e 'funcao' (funcoes). Por isso a regra ganhou os nao-terminais Globais e
- *  Funcoes (ambos podem ser vazios).
- * =========================================================================*/
 Programa:
     Globais Funcoes Principal {
         root_program.globals   = $1;
@@ -124,15 +89,13 @@ Programa:
     }
 ;
 
-/* [PARTE 2 - NOVO] secao de variaveis globais: opcional. */
 Globais:
-    /* vazio */                                  { $$ = NULL; }
+    { $$ = NULL; }
   | TOK_GLOBAL TOK_LBRACK DeclVarList TOK_RBRACK { $$ = $3; }
 ;
 
-/* [PARTE 2 - NOVO] secao de funcoes: opcional, contem uma lista de funcoes. */
 Funcoes:
-    /* vazio */                                  { $$ = NULL; }
+    { $$ = NULL; }
   | TOK_FUNCAO TOK_LBRACK FuncList TOK_RBRACK    { $$ = $3; }
 ;
 
@@ -140,22 +103,19 @@ Principal:
     TOK_PRINCIPAL Bloco                          { $$ = $2; }
 ;
 
-/* [PARTE 2 - NOVO] ---- Funcoes (tudo abaixo nao existia na G-V1) --------- */
 FuncList:
     Funcao                                       { $$ = $1; }
   | Funcao FuncList                              { $1->next = $2; $$ = $1; }
 ;
 
-/* [PARTE 2 - NOVO] uma funcao: nome(parametros): tipo  + corpo (Bloco). */
 Funcao:
     TOK_IDENT TOK_LPAREN Params TOK_RPAREN TOK_COLON Tipo Bloco {
         $$ = new_func($1, $3, $6, $7, @1.first_line);
     }
 ;
 
-/* [PARTE 2 - NOVO] lista de parametros formais (pode ser vazia). */
 Params:
-    /* vazio */                                  { $$ = NULL; }
+    { $$ = NULL; }
   | ParamList                                    { $$ = $1; }
 ;
 
@@ -164,19 +124,15 @@ ParamList:
   | Param TOK_COMMA ParamList                    { $1->next = $3; $$ = $1; }
 ;
 
-/* [PARTE 2 - NOVO] um parametro pode ser ESCALAR (n:int) ou VETOR (v[]:int). */
 Param:
     TOK_IDENT TOK_COLON Tipo {
-        $$ = new_param($1, $3, 0, @1.first_line);              /* escalar */
+        $$ = new_param($1, $3, 0, @1.first_line);
     }
   | TOK_IDENT TOK_LBRACK TOK_RBRACK TOK_COLON Tipo {
-        $$ = new_param($1, $5, 1, @1.first_line);              /* vetor   */
+        $$ = new_param($1, $5, 1, @1.first_line);
     }
 ;
 
-/* ---- Bloco: declaracoes opcionais + comandos --------------------------- */
-/* [PARTE 2 - NOVO] As declaracoes agora ficam entre COLCHETES "[ ]" (na G-V1
- * eram entre chaves). O bloco de comandos continua entre CHAVES "{ }". */
 Bloco:
     TOK_LBRACK DeclVarList TOK_RBRACK TOK_LBRACE ComandoList TOK_RBRACE {
         $$ = new_block($2, $5, @1.first_line);
@@ -186,7 +142,6 @@ Bloco:
     }
 ;
 
-/* ---- Declaracoes de variaveis ------------------------------------------ */
 DeclVarList:
     DeclVar                                      { $$ = $1; }
   | DeclVar DeclVarList {
@@ -196,7 +151,6 @@ DeclVarList:
 
 DeclVar:
     IdentList TOK_COLON Tipo TOK_SEMICOLON {
-        /* transforma cada item da lista de nomes em um Decl com o tipo $3 */
         Decl *head = NULL, *tail = NULL;
         for (IdItem *it = $1; it; ) {
             Decl *d = new_decl(it->name, $3, it->is_array, it->size,
@@ -215,7 +169,6 @@ IdentList:
 
 IdentItem:
     TOK_IDENT                                    { $$ = make_iditem($1, 0, 0); }
-    /* [PARTE 2 - NOVO] declaracao de VETOR com tamanho fixo: vet[10] */
   | TOK_IDENT TOK_LBRACK TOK_INTCONST TOK_RBRACK { $$ = make_iditem($1, 1, $3); }
 ;
 
@@ -224,18 +177,15 @@ Tipo:
   | TOK_CAR                                      { $$ = TYPE_CAR; }
 ;
 
-/* ---- Comandos ---------------------------------------------------------- */
 ComandoList:
-    /* vazio */                                  { $$ = NULL; }
+    { $$ = NULL; }
   | Comando ComandoList                          { $1->next = $2; $$ = $1; }
 ;
 
 Comando:
     TOK_SEMICOLON                                { $$ = new_stmt_empty(@1.first_line); }
-    /* [PARTE 2 - NOVO] 'retorne expr;' so existe porque agora ha funcoes. */
   | TOK_RETORNE Expr TOK_SEMICOLON               { $$ = new_stmt_return($2, @1.first_line); }
   | TOK_LEIA TOK_IDENT TOK_SEMICOLON             { $$ = new_stmt_read($2, NULL, @1.first_line); }
-    /* [PARTE 2 - NOVO] 'leia vet[i];' -- ler para um elemento de vetor. */
   | TOK_LEIA TOK_IDENT TOK_LBRACK Expr TOK_RBRACK TOK_SEMICOLON
                                                  { $$ = new_stmt_read($2, $4, @1.first_line); }
   | TOK_ESCREVA TOK_STRING TOK_SEMICOLON         { $$ = new_stmt_write_str($2, @1.first_line); }
@@ -254,7 +204,6 @@ Comando:
   | Expr TOK_SEMICOLON                           { $$ = new_stmt_expr($1, @1.first_line); }
 ;
 
-/* ---- Expressoes -------------------------------------------------------- */
 Expr:
     Expr TOK_OU Expr          { $$ = new_expr_binary(OP_OR,  $1, $3, @2.first_line); }
   | Expr TOK_E Expr           { $$ = new_expr_binary(OP_AND, $1, $3, @2.first_line); }
@@ -274,26 +223,22 @@ Expr:
   | TOK_INTCONST              { $$ = new_expr_int($1, @1.first_line); }
   | TOK_CHARCONST            { $$ = new_expr_char($1, @1.first_line); }
   | TOK_IDENT                 { $$ = new_expr_var($1, @1.first_line); }
-    /* [PARTE 2 - NOVO] acesso a elemento de vetor: vet[i] */
   | TOK_IDENT TOK_LBRACK Expr TOK_RBRACK {
         $$ = new_expr_array($1, $3, @1.first_line);
     }
-    /* [PARTE 2 - NOVO] chamada de funcao: nome(args) */
   | TOK_IDENT TOK_LPAREN ArgListOpt TOK_RPAREN {
         $$ = new_expr_call($1, $3, @1.first_line);
     }
   | TOK_IDENT TOK_ASSIGN Expr {
-        $$ = new_expr_assign($1, NULL, $3, @1.first_line);     /* x = e     */
+        $$ = new_expr_assign($1, NULL, $3, @1.first_line);
     }
-    /* [PARTE 2 - NOVO] atribuicao a elemento de vetor: vet[i] = e */
   | TOK_IDENT TOK_LBRACK Expr TOK_RBRACK TOK_ASSIGN Expr {
-        $$ = new_expr_assign($1, $3, $6, @1.first_line);       /* v[i] = e  */
+        $$ = new_expr_assign($1, $3, $6, @1.first_line);
     }
 ;
 
-/* [PARTE 2 - NOVO] lista de argumentos de uma chamada de funcao (pode ser vazia) */
 ArgListOpt:
-    /* vazio */                                  { $$ = NULL; }
+    { $$ = NULL; }
   | ArgList                                      { $$ = $1; }
 ;
 
@@ -306,8 +251,6 @@ ArgList:
 
 %%
 
-/* Chamada pelo Bison quando encontra um erro sintatico. Usamos a localizacao
- * (yylloc) capturada pelo lexer para informar a linha. */
 void yyerror(const char *s) {
     printf("ERRO SINTATICO (linha %d): %s\n", yylloc.first_line, s);
     exit(1);

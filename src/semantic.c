@@ -1,50 +1,27 @@
-/* ============================================================================
- *  semantic.c  --  Analise Semantica da linguagem Cafezinho.
- *
- *  Estrategia geral:
- *    1) Registrar variaveis GLOBAIS (escopo 0) e calcular suas posicoes.
- *    2) Verificar nomes de funcoes duplicados.
- *    3) Para cada funcao: empilhar escopo 1, inserir parametros e variaveis do
- *       bloco mais externo NO MESMO escopo (e por isso que um local com o mesmo
- *       nome de um parametro gera erro), e analisar os comandos.
- *    4) Analisar 'principal' como se fosse uma funcao sem parametros.
- *
- *  Enquanto percorremos a arvore, calculamos o TIPO de cada expressao e
- *  validamos as regras. Erros sao impressos com o numero da linha.
- * ==========================================================================*/
 #include "semantic.h"
 #include "symbol.h"
 #include <stdio.h>
 
-/* ---------------------------------------------------------------------------
- *  Descritor de tipo de uma expressao. Alem do tipo (int/car) precisamos saber
- *  se a expressao denota um VETOR inteiro (ex: o nome 'vet' sozinho) ou um
- *  escalar. Tambem marcamos 'is_error' para nao propagar erros em cascata.
- * -------------------------------------------------------------------------*/
 typedef struct {
     Type type;
     int  is_array;
     int  is_error;
 } ExprType;
 
-/* Contexto da analise: carregado por todas as funcoes auxiliares. */
 typedef struct {
     SymTab   st;
     Program *prog;
     int      error_count;
-    int      local_count;   /* contador corrente de posicoes locais (frame)   */
-    int      global_count;  /* contador de posicoes na area de globais        */
-    Func    *current_func;  /* funcao em analise (NULL no 'principal')         */
+    int      local_count;
+    int      global_count;
+    Func    *current_func;
 } Sem;
-
-/* ---- utilidades -----------------------------------------------------------*/
 
 static void sem_error(Sem *s, int line, const char *msg) {
     s->error_count++;
     printf("ERRO SEMANTICO (linha %d): %s\n", line, msg);
 }
 
-/* Procura uma funcao pelo nome na lista de funcoes do programa. */
 static Func *find_func(Program *prog, const char *name) {
     for (Func *f = prog->functions; f; f = f->next)
         if (strcmp(f->name, name) == 0)
@@ -59,21 +36,14 @@ static ExprType error_type(void) {
     ExprType r; r.type = TYPE_INT; r.is_array = 0; r.is_error = 1; return r;
 }
 
-/* protótipos (recursao mutua entre comandos e expressoes) */
 static ExprType analyze_expr(Sem *s, Expr *e);
 static void     analyze_stmt(Sem *s, Stmt *st);
 static void     analyze_decls(Sem *s, Decl *list, int category);
-static void     analyze_block_body(Sem *s, Block *b); /* mesmo escopo (funcao) */
-static void     analyze_nested_block(Sem *s, Block *b); /* novo escopo         */
+static void     analyze_block_body(Sem *s, Block *b);
+static void     analyze_nested_block(Sem *s, Block *b);
 
-/* ===========================================================================
- *  Declaracoes: insere na tabela de simbolos e calcula posicoes de memoria.
- *  - Para GLOBAIS: posicao na area de globais (vetores ocupam varias posicoes).
- *  - Para LOCAIS:  posicao no frame da funcao (continua entre blocos aninhados).
- * =========================================================================*/
 static void analyze_decls(Sem *s, Decl *list, int category) {
-    /* Posicoes: globais usam s->global_count; locais usam s->local_count
-     * (compartilhado para continuar entre blocos aninhados do mesmo frame). */
+
     for (Decl *d = list; d; d = d->next) {
         int size = d->is_array ? d->array_size : 1;
         int pos;
@@ -95,9 +65,7 @@ static void analyze_decls(Sem *s, Decl *list, int category) {
                      "variavel '%s' ja declarada neste escopo", d->name);
             sem_error(s, d->line, buf);
         } else if (category == CAT_LOCAL && s->current_func) {
-            /* Regra da linguagem: uma variavel local nao pode ter o mesmo nome
-             * de um PARAMETRO da funcao, mesmo dentro de um bloco aninhado
-             * (os parametros sao "visiveis" em toda a funcao). */
+
             for (Param *p = s->current_func->params; p; p = p->next)
                 if (strcmp(p->name, d->name) == 0) {
                     char buf[128];
@@ -111,9 +79,6 @@ static void analyze_decls(Sem *s, Decl *list, int category) {
     }
 }
 
-/* ===========================================================================
- *  Expressoes -- calcula o tipo e valida regras; decora a AST (VarRef).
- * =========================================================================*/
 static ExprType analyze_expr(Sem *s, Expr *e) {
     if (!e) return error_type();
     switch (e->kind) {
@@ -133,12 +98,12 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
             snprintf(buf, sizeof buf,
                      "variavel '%s' nao foi declarada", e->as.var.name);
             sem_error(s, e->line, buf);
-            /* recuperacao: insere um simbolo fantasma para nao repetir o erro */
+
             sym = symtab_insert(&s->st, e->as.var.name, TYPE_INT, 0, 0,
                                 CAT_LOCAL, 0);
             if (!sym) return error_type();
         }
-        /* decora o no com a informacao de memoria */
+
         e->as.var.ref.category = sym->category;
         e->as.var.ref.position = sym->position;
         e->as.var.ref.type     = sym->type;
@@ -148,8 +113,6 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
         return make_type(sym->type, sym->is_array);
     }
 
-    /* [PARTE 2 - NOVO] acesso a vetor vet[i]: o nome existe e e mesmo um vetor?
-     * o indice e escalar? O resultado de vet[i] e um ESCALAR. */
     case EX_ARRAY: {
         Symbol *sym = symtab_lookup(&s->st, e->as.arr.name);
         if (!sym) {
@@ -166,7 +129,7 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
                      e->as.arr.name);
             sem_error(s, e->line, buf);
         }
-        /* o indice deve ser uma expressao escalar */
+
         ExprType it = analyze_expr(s, e->as.arr.index);
         if (!it.is_error && it.is_array)
             sem_error(s, e->line, "o indice de um vetor deve ser escalar");
@@ -176,12 +139,10 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
         e->as.arr.ref.type     = sym->type;
         e->as.arr.ref.is_array = sym->is_array;
         e->inferred_type = sym->type;
-        e->is_array_result = 0;             /* vet[i] e um escalar */
+        e->is_array_result = 0;
         return make_type(sym->type, 0);
     }
 
-    /* [PARTE 2 - NOVO] checagem de CHAMADA DE FUNCAO: a funcao existe? o numero
-     * e o tipo (escalar x vetor) dos argumentos batem com a assinatura? */
     case EX_CALL: {
         Func *f = find_func(s->prog, e->as.call.name);
         if (!f) {
@@ -189,12 +150,12 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
             snprintf(buf, sizeof buf,
                      "funcao '%s' nao foi declarada", e->as.call.name);
             sem_error(s, e->line, buf);
-            /* ainda analisamos os argumentos para pegar outros erros */
+
             for (Arg *a = e->as.call.args; a; a = a->next)
                 analyze_expr(s, a->expr);
             return error_type();
         }
-        /* numero de argumentos */
+
         if (e->as.call.argc != f->param_count) {
             char buf[160];
             snprintf(buf, sizeof buf,
@@ -202,7 +163,7 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
                 e->as.call.name, e->as.call.argc, f->param_count);
             sem_error(s, e->line, buf);
         }
-        /* checa cada argumento contra o parametro correspondente */
+
         Arg *a = e->as.call.args;
         Param *p = f->params;
         while (a && p) {
@@ -222,7 +183,7 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
                           p->name);
                         sem_error(s, a->expr->line, buf);
                     }
-                } else { /* parametro escalar */
+                } else {
                     if (at.is_array) {
                         char buf[160];
                         snprintf(buf, sizeof buf,
@@ -230,12 +191,12 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
                           p->name);
                         sem_error(s, a->expr->line, buf);
                     }
-                    /* int e car sao compativeis entre si para escalares */
+
                 }
             }
             a = a->next; p = p->next;
         }
-        /* analisa argumentos extras (se houver) so para pegar erros internos */
+
         for (; a; a = a->next) analyze_expr(s, a->expr);
 
         e->inferred_type = f->return_type;
@@ -256,19 +217,19 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
         }
         Type target_type = sym->type;
         if (e->as.assign.index != NULL) {
-            /* atribuicao a elemento de vetor: nome deve ser vetor */
+
             if (!sym->is_array)
                 sem_error(s, e->line, "indexacao de uma variavel que nao e vetor");
             ExprType it = analyze_expr(s, e->as.assign.index);
             if (!it.is_error && it.is_array)
                 sem_error(s, e->line, "o indice de um vetor deve ser escalar");
         } else {
-            /* atribuicao a variavel inteira: nao pode ser um vetor inteiro */
+
             if (sym->is_array)
                 sem_error(s, e->line,
                           "nao se pode atribuir a um vetor inteiro (use indice)");
         }
-        /* o valor atribuido deve ser escalar */
+
         ExprType vt = analyze_expr(s, e->as.assign.value);
         if (!vt.is_error && vt.is_array)
             sem_error(s, e->line, "nao se pode atribuir um vetor a um escalar");
@@ -285,12 +246,12 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
     case EX_BINARY: {
         ExprType l = analyze_expr(s, e->as.bin.left);
         ExprType r = analyze_expr(s, e->as.bin.right);
-        /* operandos de operadores nao podem ser vetores inteiros */
+
         if (!l.is_error && l.is_array)
             sem_error(s, e->line, "uso de vetor sem indice em expressao");
         if (!r.is_error && r.is_array)
             sem_error(s, e->line, "uso de vetor sem indice em expressao");
-        /* relacionais/logicos retornam inteiro (0/1); aritmeticos, inteiro. */
+
         e->inferred_type = TYPE_INT;
         e->is_array_result = 0;
         return make_type(TYPE_INT, 0);
@@ -308,9 +269,6 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
     return error_type();
 }
 
-/* ===========================================================================
- *  Comandos.
- * =========================================================================*/
 static void analyze_stmt(Sem *s, Stmt *st) {
     if (!st) return;
     switch (st->kind) {
@@ -380,20 +338,15 @@ static void analyze_stmt(Sem *s, Stmt *st) {
         break;
     }
 
-    /* comandos sao encadeados; analisamos o proximo da sequencia */
     if (st->next) analyze_stmt(s, st->next);
 }
 
-/* Bloco que compartilha o escopo da funcao (corpo externo de funcao/principal):
- * NAO empilha um novo escopo (parametros e estes locais convivem no escopo 1). */
 static void analyze_block_body(Sem *s, Block *b) {
     if (!b) return;
     analyze_decls(s, b->decls, CAT_LOCAL);
     analyze_stmt(s, b->commands);
 }
 
-/* Bloco aninhado (comando): abre um NOVO escopo. As posicoes locais continuam
- * a contar de onde estavam (frame cresce) e voltam ao sair (frame encolhe). */
 static void analyze_nested_block(Sem *s, Block *b) {
     if (!b) return;
     int saved = s->local_count;
@@ -401,19 +354,14 @@ static void analyze_nested_block(Sem *s, Block *b) {
     analyze_decls(s, b->decls, CAT_LOCAL);
     analyze_stmt(s, b->commands);
     symtab_exit_scope(&s->st);
-    s->local_count = saved;   /* libera as posicoes do bloco */
+    s->local_count = saved;
 }
 
-/* Analisa uma funcao completa. */
-/* [PARTE 2 - NOVO] Analisa uma funcao inteira (nao existia na G-V1): abre o
- * escopo 1 (onde convivem PARAMETROS e os locais do bloco externo), registra os
- * parametros com indice 1..n, e entao analisa o corpo. */
 static void analyze_function(Sem *s, Func *f) {
     s->current_func = f;
-    symtab_enter_scope(&s->st, 1);   /* escopo dos parametros + locais externos */
+    symtab_enter_scope(&s->st, 1);
     s->local_count = 0;
 
-    /* insere os parametros (indice 1..n). Eles ficam no escopo 1. */
     int idx = 1;
     for (Param *p = f->params; p; p = p->next) {
         p->index = idx++;
@@ -427,15 +375,11 @@ static void analyze_function(Sem *s, Func *f) {
         }
     }
 
-    /* o corpo externo da funcao compartilha o escopo dos parametros */
     analyze_block_body(s, f->body);
 
     symtab_exit_scope(&s->st);
 }
 
-/* ===========================================================================
- *  Ponto de entrada da fase semantica.
- * =========================================================================*/
 int check_semantics(Program *prog) {
     Sem s;
     s.prog = prog;
@@ -445,10 +389,8 @@ int check_semantics(Program *prog) {
     s.current_func = NULL;
     symtab_init(&s.st);
 
-    /* 1) registra as variaveis globais (escopo 0) */
     analyze_decls(&s, prog->globals, CAT_GLOBAL);
 
-    /* 2) verifica nomes de funcoes duplicados */
     for (Func *f = prog->functions; f; f = f->next)
         for (Func *g = f->next; g; g = g->next)
             if (strcmp(f->name, g->name) == 0) {
@@ -458,11 +400,9 @@ int check_semantics(Program *prog) {
                 sem_error(&s, g->line, buf);
             }
 
-    /* 3) analisa o corpo de cada funcao */
     for (Func *f = prog->functions; f; f = f->next)
         analyze_function(&s, f);
 
-    /* 4) analisa o 'principal' (como funcao sem parametros) */
     s.current_func = NULL;
     symtab_enter_scope(&s.st, 1);
     s.local_count = 0;
