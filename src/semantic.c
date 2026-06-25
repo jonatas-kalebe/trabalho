@@ -148,6 +148,8 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
         return make_type(sym->type, sym->is_array);
     }
 
+    /* [PARTE 2 - NOVO] acesso a vetor vet[i]: o nome existe e e mesmo um vetor?
+     * o indice e escalar? O resultado de vet[i] e um ESCALAR. */
     case EX_ARRAY: {
         Symbol *sym = symtab_lookup(&s->st, e->as.arr.name);
         if (!sym) {
@@ -178,6 +180,8 @@ static ExprType analyze_expr(Sem *s, Expr *e) {
         return make_type(sym->type, 0);
     }
 
+    /* [PARTE 2 - NOVO] checagem de CHAMADA DE FUNCAO: a funcao existe? o numero
+     * e o tipo (escalar x vetor) dos argumentos batem com a assinatura? */
     case EX_CALL: {
         Func *f = find_func(s->prog, e->as.call.name);
         if (!f) {
@@ -401,6 +405,9 @@ static void analyze_nested_block(Sem *s, Block *b) {
 }
 
 /* Analisa uma funcao completa. */
+/* [PARTE 2 - NOVO] Analisa uma funcao inteira (nao existia na G-V1): abre o
+ * escopo 1 (onde convivem PARAMETROS e os locais do bloco externo), registra os
+ * parametros com indice 1..n, e entao analisa o corpo. */
 static void analyze_function(Sem *s, Func *f) {
     s->current_func = f;
     symtab_enter_scope(&s->st, 1);   /* escopo dos parametros + locais externos */

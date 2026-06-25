@@ -110,6 +110,11 @@ static IdItem *make_iditem(char *name, int is_array, int size) {
 
 /* ===========================================================================
  *  Estrutura geral do programa:  [global] [funcao] principal
+ *
+ *  [PARTE 2 - NOVO] Na linguagem-base (G-V1) o programa era SO o 'principal'.
+ *  Agora ele tem duas secoes OPCIONAIS antes dele: 'global' (variaveis globais)
+ *  e 'funcao' (funcoes). Por isso a regra ganhou os nao-terminais Globais e
+ *  Funcoes (ambos podem ser vazios).
  * =========================================================================*/
 Programa:
     Globais Funcoes Principal {
@@ -119,11 +124,13 @@ Programa:
     }
 ;
 
+/* [PARTE 2 - NOVO] secao de variaveis globais: opcional. */
 Globais:
     /* vazio */                                  { $$ = NULL; }
   | TOK_GLOBAL TOK_LBRACK DeclVarList TOK_RBRACK { $$ = $3; }
 ;
 
+/* [PARTE 2 - NOVO] secao de funcoes: opcional, contem uma lista de funcoes. */
 Funcoes:
     /* vazio */                                  { $$ = NULL; }
   | TOK_FUNCAO TOK_LBRACK FuncList TOK_RBRACK    { $$ = $3; }
@@ -133,18 +140,20 @@ Principal:
     TOK_PRINCIPAL Bloco                          { $$ = $2; }
 ;
 
-/* ---- Funcoes ----------------------------------------------------------- */
+/* [PARTE 2 - NOVO] ---- Funcoes (tudo abaixo nao existia na G-V1) --------- */
 FuncList:
     Funcao                                       { $$ = $1; }
   | Funcao FuncList                              { $1->next = $2; $$ = $1; }
 ;
 
+/* [PARTE 2 - NOVO] uma funcao: nome(parametros): tipo  + corpo (Bloco). */
 Funcao:
     TOK_IDENT TOK_LPAREN Params TOK_RPAREN TOK_COLON Tipo Bloco {
         $$ = new_func($1, $3, $6, $7, @1.first_line);
     }
 ;
 
+/* [PARTE 2 - NOVO] lista de parametros formais (pode ser vazia). */
 Params:
     /* vazio */                                  { $$ = NULL; }
   | ParamList                                    { $$ = $1; }
@@ -155,6 +164,7 @@ ParamList:
   | Param TOK_COMMA ParamList                    { $1->next = $3; $$ = $1; }
 ;
 
+/* [PARTE 2 - NOVO] um parametro pode ser ESCALAR (n:int) ou VETOR (v[]:int). */
 Param:
     TOK_IDENT TOK_COLON Tipo {
         $$ = new_param($1, $3, 0, @1.first_line);              /* escalar */
@@ -165,6 +175,8 @@ Param:
 ;
 
 /* ---- Bloco: declaracoes opcionais + comandos --------------------------- */
+/* [PARTE 2 - NOVO] As declaracoes agora ficam entre COLCHETES "[ ]" (na G-V1
+ * eram entre chaves). O bloco de comandos continua entre CHAVES "{ }". */
 Bloco:
     TOK_LBRACK DeclVarList TOK_RBRACK TOK_LBRACE ComandoList TOK_RBRACE {
         $$ = new_block($2, $5, @1.first_line);
@@ -203,6 +215,7 @@ IdentList:
 
 IdentItem:
     TOK_IDENT                                    { $$ = make_iditem($1, 0, 0); }
+    /* [PARTE 2 - NOVO] declaracao de VETOR com tamanho fixo: vet[10] */
   | TOK_IDENT TOK_LBRACK TOK_INTCONST TOK_RBRACK { $$ = make_iditem($1, 1, $3); }
 ;
 
@@ -219,8 +232,10 @@ ComandoList:
 
 Comando:
     TOK_SEMICOLON                                { $$ = new_stmt_empty(@1.first_line); }
+    /* [PARTE 2 - NOVO] 'retorne expr;' so existe porque agora ha funcoes. */
   | TOK_RETORNE Expr TOK_SEMICOLON               { $$ = new_stmt_return($2, @1.first_line); }
   | TOK_LEIA TOK_IDENT TOK_SEMICOLON             { $$ = new_stmt_read($2, NULL, @1.first_line); }
+    /* [PARTE 2 - NOVO] 'leia vet[i];' -- ler para um elemento de vetor. */
   | TOK_LEIA TOK_IDENT TOK_LBRACK Expr TOK_RBRACK TOK_SEMICOLON
                                                  { $$ = new_stmt_read($2, $4, @1.first_line); }
   | TOK_ESCREVA TOK_STRING TOK_SEMICOLON         { $$ = new_stmt_write_str($2, @1.first_line); }
@@ -259,20 +274,24 @@ Expr:
   | TOK_INTCONST              { $$ = new_expr_int($1, @1.first_line); }
   | TOK_CHARCONST            { $$ = new_expr_char($1, @1.first_line); }
   | TOK_IDENT                 { $$ = new_expr_var($1, @1.first_line); }
+    /* [PARTE 2 - NOVO] acesso a elemento de vetor: vet[i] */
   | TOK_IDENT TOK_LBRACK Expr TOK_RBRACK {
         $$ = new_expr_array($1, $3, @1.first_line);
     }
+    /* [PARTE 2 - NOVO] chamada de funcao: nome(args) */
   | TOK_IDENT TOK_LPAREN ArgListOpt TOK_RPAREN {
         $$ = new_expr_call($1, $3, @1.first_line);
     }
   | TOK_IDENT TOK_ASSIGN Expr {
         $$ = new_expr_assign($1, NULL, $3, @1.first_line);     /* x = e     */
     }
+    /* [PARTE 2 - NOVO] atribuicao a elemento de vetor: vet[i] = e */
   | TOK_IDENT TOK_LBRACK Expr TOK_RBRACK TOK_ASSIGN Expr {
         $$ = new_expr_assign($1, $3, $6, @1.first_line);       /* v[i] = e  */
     }
 ;
 
+/* [PARTE 2 - NOVO] lista de argumentos de uma chamada de funcao (pode ser vazia) */
 ArgListOpt:
     /* vazio */                                  { $$ = NULL; }
   | ArgList                                      { $$ = $1; }

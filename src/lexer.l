@@ -10,6 +10,11 @@
  *
  *  O Flex transforma as expressoes regulares abaixo em um AUTOMATO FINITO que
  *  reconhece cada padrao usando a regra do "maior casamento" (maximal munch).
+ *
+ *  >>> COMO ACHAR AS NOVIDADES DA PARTE 2 <<<
+ *  Procure pela etiqueta  [PARTE 2 - NOVO]  neste e nos outros arquivos. Ela
+ *  marca tudo o que foi acrescentado em relacao a linguagem-base (G-V1):
+ *  vetores, funcoes, variaveis globais e os colchetes "[" "]" das declaracoes.
  * ==========================================================================*/
 %option noyywrap
 %option yylineno
@@ -34,15 +39,15 @@ void yyerror(const char *s);
 %%
 
  /* ---- Palavras reservadas ---------------------------------------------- */
-"global"    { return TOK_GLOBAL; }
-"funcao"    { return TOK_FUNCAO; }
+"global"    { return TOK_GLOBAL; }    /* [PARTE 2 - NOVO] secao de variaveis globais */
+"funcao"    { return TOK_FUNCAO; }    /* [PARTE 2 - NOVO] secao de funcoes            */
 "principal" { return TOK_PRINCIPAL; }
 "se"        { return TOK_SE; }
 "entao"     { return TOK_ENTAO; }
 "senao"     { return TOK_SENAO; }
 "fimse"     { return TOK_FIMSE; }
 "enquanto"  { return TOK_ENQUANTO; }
-"retorne"   { return TOK_RETORNE; }
+"retorne"   { return TOK_RETORNE; }   /* [PARTE 2 - NOVO] retorno de funcao           */
 "leia"      { return TOK_LEIA; }
 "escreva"   { return TOK_ESCREVA; }
 "novalinha" { return TOK_NOVALINHA; }
@@ -70,8 +75,8 @@ void yyerror(const char *s);
 "}"         { return TOK_RBRACE; }
 "("         { return TOK_LPAREN; }
 ")"         { return TOK_RPAREN; }
-"["         { return TOK_LBRACK; }
-"]"         { return TOK_RBRACK; }
+"["         { return TOK_LBRACK; }    /* [PARTE 2 - NOVO] abre secao de declaracoes / indice de vetor */
+"]"         { return TOK_RBRACK; }    /* [PARTE 2 - NOVO] fecha secao de declaracoes / indice de vetor */
 ":"         { return TOK_COLON; }
 ";"         { return TOK_SEMICOLON; }
 ","         { return TOK_COMMA; }

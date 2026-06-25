@@ -127,7 +127,11 @@ static void emit_escaped_string(Gen *g, const char *s) {
  *    LOCAL  pos p : endereco = $fp - 4*p
  * =========================================================================*/
 
-/* carrega o valor de uma variavel ESCALAR no registrador reg */
+/* carrega o valor de uma variavel ESCALAR no registrador reg.
+ * [PARTE 2 - NOVO] Na G-V1 so havia variaveis LOCAIS. Agora ha tres categorias:
+ *   GLOBAL -> via $s1 (base fixa das globais)  | NOVO
+ *   PARAM  -> via $fp + 4*i (argumento)        | NOVO
+ *   LOCAL  -> via $fp - 4*p (ja existia) */
 static void emit_scalar_load(Gen *g, VarRef *r, const char *reg) {
     if (r->category == CAT_GLOBAL)
         emit(g, "    lw %s, %d($s1)", reg, -4 * (r->position - 1));
@@ -147,10 +151,10 @@ static void emit_scalar_store(Gen *g, VarRef *r, const char *reg) {
         emit(g, "    sw %s, %d($fp)", reg, -4 * r->position);
 }
 
-/* Calcula no registrador $t0 o ENDERECO do elemento vetor[indice].
- * Estrategia: endereco = base0 - 4*indice, onde base0 e o endereco do
- * elemento de indice 0. (A pilha cresce para baixo, entao indices maiores
- * ficam em enderecos menores -- por isso a subtracao.) */
+/* [PARTE 2 - NOVO] Vetores: calcula no registrador $t0 o ENDERECO do elemento
+ * vetor[indice]. Estrategia: endereco = base0 - 4*indice, onde base0 e o
+ * endereco do elemento de indice 0. (A pilha cresce para baixo, entao indices
+ * maiores ficam em enderecos menores -- por isso a subtracao.) */
 static void emit_array_elem_addr(Gen *g, VarRef *r, Expr *index) {
     cgen_expr(g, index);              /* $s0 = indice                        */
     emit(g, "    sll $s0, $s0, 2");   /* $s0 = 4*indice                      */
@@ -163,8 +167,9 @@ static void emit_array_elem_addr(Gen *g, VarRef *r, Expr *index) {
     emit(g, "    sub $t0, $t0, $s0"); /* $t0 = endereco do elemento          */
 }
 
-/* Empilha um argumento de chamada de funcao. Se for um vetor (passagem por
- * referencia), empilha o ENDERECO base; caso contrario, empilha o VALOR. */
+/* [PARTE 2 - NOVO] Empilha um argumento de chamada de funcao. Se for um vetor,
+ * usa PASSAGEM POR REFERENCIA: empilha o ENDERECO base (para a funcao poder
+ * alterar o vetor do chamador). Se for escalar, empilha o VALOR. */
 static void cgen_argument(Gen *g, Expr *arg) {
     if (arg->kind == EX_VAR && arg->as.var.ref.is_array) {
         VarRef *r = &arg->as.var.ref;
@@ -210,7 +215,7 @@ static void cgen_expr(Gen *g, Expr *e) {
         emit_scalar_load(g, &e->as.var.ref, "$s0");
         break;
 
-    case EX_ARRAY:
+    case EX_ARRAY:   /* [PARTE 2 - NOVO] ler vet[i]: calcula endereco e carrega */
         emit_array_elem_addr(g, &e->as.arr.ref, e->as.arr.index);
         emit(g, "    lw $s0, 0($t0)");
         break;
@@ -234,8 +239,8 @@ static void cgen_expr(Gen *g, Expr *e) {
         break;
 
     case EX_CALL: {
-        /* SEQUENCIA DE CHAMADA (lado do chamador):
-         *   1. empilha o $fp do chamador
+        /* [PARTE 2 - NOVO] SEQUENCIA DE CHAMADA (lado do chamador):
+         *   1. empilha o $fp do chamador (a "ligacao de controle")
          *   2. empilha os argumentos em ordem inversa
          *   3. jal <funcao>
          * O retorno (lado do chamado) restaura $sp e $fp; resultado em $s0. */
@@ -402,12 +407,13 @@ static void cgen_block(Gen *g, Block *b, int allocate_locals) {
 }
 
 /* ===========================================================================
- *  Geracao de uma FUNCAO completa (prologo, corpo, epilogo).
+ *  [PARTE 2 - NOVO] Geracao de uma FUNCAO completa (nao existia na G-V1):
+ *  prologo, corpo e epilogo. Constroi/desmonta o REGISTRO DE ATIVACAO (frame).
  *
  *  Registro de Ativacao (de cima/enderecos maiores para baixo):
- *      $fp do chamador
+ *      $fp do chamador    (ligacao de controle)
  *      argumento n ... argumento 1
- *      $ra                <- $fp aponta aqui
+ *      $ra                <- $fp aponta aqui (endereco de retorno)
  *      local 1 ... local m
  *                         <- $sp
  * =========================================================================*/
@@ -448,7 +454,8 @@ static void cgen_principal(Gen *g, Program *prog) {
     int lp    = decls_size(prog->main_block ? prog->main_block->decls : NULL);
 
     emit(g, "main:");
-    /* base das globais: $s1 = $sp atual; depois reservamos o espaco delas */
+    /* [PARTE 2 - NOVO] base das variaveis GLOBAIS: $s1 = $sp atual; depois
+     * descemos o $sp para reservar o espaco delas. $s1 nunca mais muda. */
     emit(g, "    move $s1, $sp");
     if (gsize > 0)
         emit(g, "    addiu $sp, $sp, %d", -4 * gsize);

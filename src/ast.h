@@ -93,9 +93,9 @@ typedef enum {
     EX_INT,     /* constante inteira        ex: 42                            */
     EX_CHAR,    /* constante caractere      ex: 'a'                           */
     EX_VAR,     /* uso de variavel escalar  ex: n                            */
-    EX_ARRAY,   /* acesso a elemento de vetor ex: vet[i]                     */
-    EX_CALL,    /* chamada de funcao        ex: fatorial(n-1)                */
-    EX_ASSIGN,  /* atribuicao               ex: x = e   ou   vet[i] = e      */
+    EX_ARRAY,   /* [PARTE 2 - NOVO] acesso a elemento de vetor   ex: vet[i]   */
+    EX_CALL,    /* [PARTE 2 - NOVO] chamada de funcao            ex: fat(n-1) */
+    EX_ASSIGN,  /* atribuicao  x=e  ou (NOVO na P2) vet[i]=e                  */
     EX_BINARY,  /* operacao binaria         ex: a + b                        */
     EX_UNARY    /* operacao unaria          ex: -a  ou  !a                   */
 } ExprKind;
@@ -140,8 +140,8 @@ struct Arg {
 typedef struct Decl {
     char *name;
     Type  type;
-    int   is_array;     /* 1 se vetor                                        */
-    int   array_size;   /* tamanho do vetor (valido se is_array)             */
+    int   is_array;     /* [PARTE 2 - NOVO] 1 se for vetor                    */
+    int   array_size;   /* [PARTE 2 - NOVO] tamanho do vetor (se is_array)    */
     int   line;
     int   category;     /* CAT_GLOBAL ou CAT_LOCAL (anotado pela semantica)  */
     int   position;     /* posicao na area de globais/locais                 */
@@ -149,8 +149,9 @@ typedef struct Decl {
 } Decl;
 
 /* ----------------------------------------------------------------------------
- *  Parametro formal de uma funcao. Pode ser escalar (n:int) ou vetor (v[]:int).
- *  Vetores sao passados POR REFERENCIA (passa-se o endereco base).
+ *  [PARTE 2 - NOVO] Parametro formal de uma funcao (nao existia na G-V1).
+ *  Pode ser escalar (n:int) ou vetor (v[]:int). Vetores sao passados POR
+ *  REFERENCIA (passa-se o endereco base, nao uma copia).
  * --------------------------------------------------------------------------*/
 typedef struct Param {
     char *name;
@@ -169,7 +170,7 @@ typedef struct Block Block;
 typedef enum {
     ST_EMPTY,       /* ;                                                     */
     ST_EXPR,        /* expressao usada como comando (ex: chamada, atribuicao)*/
-    ST_RETURN,      /* retorne Expr;                                         */
+    ST_RETURN,      /* [PARTE 2 - NOVO] retorne Expr;  (so existe por causa das funcoes) */
     ST_READ,        /* leia lvalue;                                          */
     ST_WRITE_EXPR,  /* escreva Expr;                                         */
     ST_WRITE_STR,   /* escreva "texto";                                      */
@@ -205,7 +206,8 @@ struct Block {
 };
 
 /* ----------------------------------------------------------------------------
- *  Funcao. Lista ligada (varias funcoes dentro de 'funcao[...]').
+ *  [PARTE 2 - NOVO] Funcao (nao existia na G-V1). Lista ligada (varias funcoes
+ *  dentro de 'funcao[...]').
  * --------------------------------------------------------------------------*/
 typedef struct Func {
     char  *name;
@@ -221,8 +223,8 @@ typedef struct Func {
  *  No raiz: o programa inteiro. Globais + funcoes + bloco principal.
  * --------------------------------------------------------------------------*/
 typedef struct {
-    Decl *globals;       /* variaveis globais (pode ser NULL)                */
-    Func *functions;     /* funcoes do programa (pode ser NULL)              */
+    Decl *globals;       /* [PARTE 2 - NOVO] variaveis globais (pode ser NULL) */
+    Func *functions;     /* [PARTE 2 - NOVO] funcoes do programa (pode ser NULL)*/
     Block *main_block;   /* corpo de 'principal'                             */
 } Program;
 
